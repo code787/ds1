@@ -87,6 +87,26 @@ class MainActivity : Activity() {
         })
 
         root.addView(Button(this).apply {
+            text = "复制日志到剪贴板"
+            setOnClickListener {
+                val file = java.io.File(com.wristcontrol.app.transport.DiagnoseLog.path(this@MainActivity))
+                if (!file.exists()) {
+                    statusText.text = "还没有日志。先点「启动桥接」试一次。"
+                } else {
+                    try {
+                        val text = file.readText()
+                        val cm = getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                            as android.content.ClipboardManager
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("WristControl 诊断日志", text))
+                        statusText.text = "已复制 ${text.length} 个字符到剪贴板。\n直接粘贴给开发者即可。"
+                    } catch (t: Throwable) {
+                        statusText.text = "复制失败：${t.javaClass.simpleName}"
+                    }
+                }
+            }
+        })
+
+        root.addView(Button(this).apply {
             text = "查看诊断日志"
             setOnClickListener {
                 val path = com.wristcontrol.app.transport.DiagnoseLog.path(this@MainActivity)
