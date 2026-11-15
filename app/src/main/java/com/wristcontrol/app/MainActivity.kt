@@ -112,8 +112,9 @@ class MainActivity : Activity() {
                 // 官方示例是在 Activity 的 onCreate 里查节点就能拿到。
                 // 这里手动触发一次，用来对比「Activity 上下文」与「Service 上下文」是否有差异。
                 try {
-                    val ctx = applicationContext
-                    val api = com.xiaomi.xms.wearable.Wearable.getNodeApi(ctx)
+                    // 与 Service 共用单例，避免各建一套连接
+                    val transport = com.wristcontrol.app.transport.XiaomiWearableTransport.get(this@MainActivity)
+                    val api = com.xiaomi.xms.wearable.Wearable.getNodeApi(applicationContext)
                     api.connectedNodes
                         .addOnSuccessListener { nodes ->
                             val n = nodes?.size ?: 0

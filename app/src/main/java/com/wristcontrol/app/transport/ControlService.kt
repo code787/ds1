@@ -106,7 +106,9 @@ class ControlService : Service() {
     /** 启动 SDK 桥接。失败只更新状态，不抛异常。 */
     private fun startBridge() {
         try {
-            val t = XiaomiWearableTransport(this)
+            // 用全局单例：与 Activity 探测共用同一套 SDK 连接，
+            // 避免 Service 每次新建实例都要重新绑定宿主服务
+            val t = XiaomiWearableTransport.get(this)
             transport = t
             t.start(
                 onCommand = ::handleCommandSafely,

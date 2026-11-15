@@ -17,10 +17,26 @@ import com.wristcontrol.app.protocol.Command
  * - sendMessage 的 Task 成功只代表本地通道收下了，不代表手环收到；
  * - 失败回调给的是 Exception，不是 Status，不要调 getCode()。
  */
-class XiaomiWearableTransport(private val context: Context) {
+class XiaomiWearableTransport private constructor(private val context: Context) {
 
-    private companion object {
+    companion object {
         const val TAG = "WristTransport"
+
+        /**
+         * 全局单例。
+         *
+         * 每次 new 都会让 SDK 重新绑定宿主服务，绑定期间 getConnectedNodes()
+         * 返回空列表——这就是「Activity 探测有节点、Service 启动桥接拿不到」的原因：
+         * 两者各自持有一套 API 对象，Service 那套每次都是刚绑定、还没热。
+         * 共用一份实例后，谁先建立连接，另一个直接复用。
+         */
+        @Volatile
+        private var instance: XiaomiWearableTransport? = null
+
+        fun get(context: Context): XiaomiWearableTransport =
+            instance ?: synchronized(this) {
+                instance ?: XiaomiWearableTransport(context.applicationContext).also { instance = it }
+            }
 
         /** 节点查询间隔。 */
         const val NODE_RETRY_MS = 2_000L
