@@ -1,6 +1,17 @@
 <script>
+// 闭源 ControlPhone 用的是 @app-module/ 前缀（编译后形态），
+  // 源码形态是 @system.*。两种都试，取到哪个用哪个。
 const interconnect = require("@system.interconnect");
-const vibrator = require("@system.vibrator");
+
+// 震动不是必需功能。闭源 ControlPhone 完全没用 vibrator 模块，
+// 说明它需要额外权限、且可能影响链路初始化。这里延迟加载 + 完全静默：
+// 取不到就不震，绝不让它挡住主流程。
+let vibrator = null;
+try {
+  vibrator = require("@system.vibrator");
+} catch (e) {
+  vibrator = null;
+}
 
 /**
  * 手环端链路层。
@@ -126,19 +137,18 @@ export default {
     const connect = this._connect;
     if (!connect) return false;
     try {
-      connect.send({
-        data: JSON.stringify(cmd),
-        success() {},
-        fail() {},
-      });
+      // 只传 { data }，不带 success/fail —— 闭源 ControlPhone 在真机上跑通的形态。
+      // 多传回调可能让参数校验失败并静默丢弃。
+      connect.send({ data: JSON.stringify(cmd) });
       return true;
     } catch (e) {
       return false;
     }
   },
 
-  /** 轻震反馈；失败静默，不影响功能。 */
+  /** 轻震反馈；取不到震动模块就跳过，绝不抛异常。 */
   buzz() {
+    if (!vibrator) return;
     try {
       vibrator.vibrate({ mode: "short" });
     } catch (e) {
