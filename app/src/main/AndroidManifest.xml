@@ -33,6 +33,11 @@
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
 
+        <!--
+            isAccessibilityTool="true" 是 Android 14+ 的要求：
+            声明本服务是"无障碍工具"，否则系统在部分 ROM 上会拒绝启用。
+            本应用确实是为操作便利而做的辅助工具，如实声明。
+        -->
         <service
             android:name=".input.ControlAccessibilityService"
             android:exported="true"

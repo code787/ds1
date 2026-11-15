@@ -3,15 +3,15 @@ package com.wristcontrol.app.transport
 import android.content.Context
 import android.util.Log
 import com.wristcontrol.app.protocol.Command
-import com.xiaomi.xms.wearable.Wearable
-import com.xiaomi.xms.wearable.auth.Permission
-import com.xiaomi.xms.wearable.message.OnMessageReceivedListener
-import com.xiaomi.xms.wearable.node.Node
 
 /**
  * 小米官方 interconnect SDK 1.4 的封装。
  *
- * 只走 SDK 的「自定义消息」通道（MessageApi），不使用通知桥。
+ * 关键设计：**SDK 的每一次调用都可能因为环境缺失而抛异常**。
+ * 常见原因：没装小米运动健康、SDK 版本不匹配、服务未绑定。
+ * 所有入口都包 try-catch，失败只记日志并回调 onError，绝不把异常抛给前台服务
+ * （前台服务一崩，整个桥接就没了，用户看到的就是"闪退"）。
+ *
  * 调用约束来自官方示例与导航环的实测：
  * - 没有 nodeId 时绝不能调用 SDK（传空 id 是伪造结果）；
  * - sendMessage 的 Task 成功只代表本地通道收下了，不代表手环收到；
@@ -23,17 +23,26 @@ class XiaomiWearableTransport(private val context: Context) {
         const val TAG = "WristTransport"
     }
 
-    private val nodeApi = Wearable.getNodeApi(context)
-    private val authApi = Wearable.getAuthApi(context)
-    private val messageApi = Wearable.getMessageApi(context)
+    /** SDK 是否可用。不可用时所有操作直接返回失败，不再尝试。 */
+    @Volatile
+    private var sdkAvailable = false
 
-    @Volatile private var nodeId: String? = null
-    @Volatile private var listeningNodeId: String? = null
+    @Volatile
+    private var nodeId: String? = null
+
+    @Volatile
+    private var listeningNodeId: String? = null
 
     private var onCommand: ((Command) -> Unit)? = null
     private var onStatus: (() -> Unit)? = null
+    private var onError: ((String) -> Unit)? = null
 
-    private val listener = OnMessageReceivedListener { _, payload ->
+    // 延迟初始化：SDK 类在类加载时就会触发，必须包起来
+    private val nodeApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getNodeApi(context) }.getOrNull() }
+    private val authApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getAuthApi(context) }.getOrNull() }
+    private val messageApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getMessageApi(context) }.getOrNull() }
+
+    private val listener = com.xiaomi.xms.wearable.message.OnMessageReceivedListener { _, payload ->
         val handler = onCommand ?: return@OnMessageReceivedListener
         val text = try {
             String(payload, Charsets.UTF_8)
@@ -46,39 +55,79 @@ class XiaomiWearableTransport(private val context: Context) {
             Log.w(TAG, "无法识别的指令: $text")
             return@OnMessageReceivedListener
         }
-        handler(command)
+        try {
+            handler(command)
+        } catch (t: Throwable) {
+            Log.w(TAG, "处理指令失败: ${t.javaClass.simpleName}")
+        }
     }
 
     fun hasNode(): Boolean = !nodeId.isNullOrEmpty()
 
-    /** 发现手环节点并注册接收监听。 */
-    fun start(onCommand: (Command) -> Unit, onStatus: () -> Unit) {
+    /** 发现手环节点并注册接收监听。任何失败都通过 onError 报告，不抛异常。 */
+    fun start(onCommand: (Command) -> Unit, onStatus: () -> Unit, onError: (String) -> Unit) {
         this.onCommand = onCommand
         this.onStatus = onStatus
+        this.onError = onError
+
+        if (nodeApi == null || authApi == null || messageApi == null) {
+            fail("小米互联 SDK 初始化失败：未安装小米运动健康或版本不匹配")
+            return
+        }
+        sdkAvailable = true
         refreshNode { resolved ->
-            if (resolved != null) {
-                requestPermission { granted ->
-                    if (granted) {
-                        startListening(resolved)
-                        onStatus()
-                    } else {
-                        Log.w(TAG, "未获得 DEVICE_MANAGER 权限，无法接收手环消息")
-                    }
+            if (resolved == null) {
+                fail("没有找到已连接的手环")
+                return@refreshNode
+            }
+            requestPermission { granted ->
+                if (granted) {
+                    startListening(resolved)
+                    safeStatus()
+                } else {
+                    fail("未获得设备管理权限，请在手机上确认授权")
                 }
             }
         }
     }
 
     fun stop() {
-        stopListening()
+        try {
+            stopListening()
+        } catch (t: Throwable) {
+            Log.w(TAG, "stopListening 异常: ${t.javaClass.simpleName}")
+        }
         onCommand = null
         onStatus = null
+        onError = null
+    }
+
+    private fun fail(message: String) {
+        Log.w(TAG, message)
+        try {
+            onError?.invoke(message)
+        } catch (t: Throwable) {
+            Log.w(TAG, "onError 回调异常: ${t.javaClass.simpleName}")
+        }
+    }
+
+    private fun safeStatus() {
+        try {
+            onStatus?.invoke()
+        } catch (t: Throwable) {
+            Log.w(TAG, "onStatus 回调异常: ${t.javaClass.simpleName}")
+        }
     }
 
     private fun refreshNode(onResult: (String?) -> Unit) {
+        val api = nodeApi
+        if (api == null) {
+            onResult(null)
+            return
+        }
         try {
-            nodeApi.getConnectedNodes()
-                .addOnSuccessListener { nodes: List<Node>? ->
+            api.getConnectedNodes()
+                .addOnSuccessListener { nodes: List<com.xiaomi.xms.wearable.node.Node>? ->
                     val first = nodes?.firstOrNull()
                     nodeId = first?.id
                     Log.i(TAG, "节点: ${first?.name ?: "(无)"} id=${nodeId ?: "(空)"}")
@@ -97,7 +146,7 @@ class XiaomiWearableTransport(private val context: Context) {
     }
 
     /**
-     * 自定义消息通道需要 DEVICE_MANAGER 权限，未授予时先请求。
+     * 自定义消息通道需要 DEVICE_MANAGER 权限。
      *
      * 注意 SDK 的两个 Task 返回类型不同：
      * - checkPermission 返回 Boolean（是否已授予）
@@ -106,16 +155,17 @@ class XiaomiWearableTransport(private val context: Context) {
      */
     private fun requestPermission(onResult: (Boolean) -> Unit) {
         val target = nodeId ?: return onResult(false)
+        val api = authApi ?: return onResult(false)
         try {
-            authApi.checkPermission(target, Permission.DEVICE_MANAGER)
+            api.checkPermission(target, com.xiaomi.xms.wearable.auth.Permission.DEVICE_MANAGER)
                 .addOnSuccessListener { granted ->
                     if (granted == true) {
                         onResult(true)
                     } else {
-                        authApi.requestPermission(target, Permission.DEVICE_MANAGER)
+                        api.requestPermission(target, com.xiaomi.xms.wearable.auth.Permission.DEVICE_MANAGER)
                             .addOnSuccessListener { grantedList ->
-                                // 请求成功不代表一定授予；以返回列表里是否含该权限为准。
-                                val grantedNow = grantedList?.any { it == Permission.DEVICE_MANAGER } == true
+                                val grantedNow =
+                                    grantedList?.any { it == com.xiaomi.xms.wearable.auth.Permission.DEVICE_MANAGER } == true
                                 if (!grantedNow) {
                                     Log.w(TAG, "requestPermission 返回的列表里没有 DEVICE_MANAGER")
                                 }
@@ -139,13 +189,14 @@ class XiaomiWearableTransport(private val context: Context) {
 
     private fun startListening(target: String) {
         if (listeningNodeId == target) return
+        val api = messageApi ?: return
         val previous = listeningNodeId
         listeningNodeId = target
         try {
             if (previous != null && previous != target) {
-                messageApi.removeListener(previous)
+                api.removeListener(previous)
             }
-            messageApi.addListener(target, listener)
+            api.addListener(target, listener)
                 .addOnFailureListener { error ->
                     Log.w(TAG, "addListener 失败: ${error.message}")
                 }
@@ -157,9 +208,10 @@ class XiaomiWearableTransport(private val context: Context) {
 
     private fun stopListening() {
         val target = listeningNodeId ?: return
+        val api = messageApi ?: return
         listeningNodeId = null
         try {
-            messageApi.removeListener(target)
+            api.removeListener(target)
         } catch (t: Throwable) {
             Log.w(TAG, "removeListener 抛出: ${t.javaClass.simpleName}")
         }
@@ -167,9 +219,11 @@ class XiaomiWearableTransport(private val context: Context) {
 
     /** 发送任意 UTF-8 载荷。没有节点时直接返回 false，不伪造成功。 */
     fun sendRaw(payload: ByteArray): Boolean {
+        if (!sdkAvailable) return false
         val target = nodeId ?: return false
+        val api = messageApi ?: return false
         return try {
-            messageApi.sendMessage(target, payload)
+            api.sendMessage(target, payload)
                 .addOnFailureListener { error ->
                     Log.w(TAG, "sendMessage 失败: ${error.message}")
                 }
