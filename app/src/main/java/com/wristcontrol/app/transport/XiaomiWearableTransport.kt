@@ -38,10 +38,13 @@ class XiaomiWearableTransport(private val context: Context) {
     private var onError: ((String) -> Unit)? = null
 
     // 延迟初始化：SDK 类在类加载时就会触发，必须包起来
-    private val nodeApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getNodeApi(context) }.getOrNull() }
-    private val authApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getAuthApi(context) }.getOrNull() }
-    private val messageApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getMessageApi(context) }.getOrNull() }
-    private val serviceApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getServiceApi(context) }.getOrNull() }
+    // 官方示例统一用 applicationContext，这里保持一致。
+    private val appContext = context.applicationContext
+
+    private val nodeApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getNodeApi(appContext) }.getOrNull() }
+    private val authApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getAuthApi(appContext) }.getOrNull() }
+    private val messageApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getMessageApi(appContext) }.getOrNull() }
+    private val serviceApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getServiceApi(appContext) }.getOrNull() }
 
     private val listener = com.xiaomi.xms.wearable.message.OnMessageReceivedListener { _, payload ->
         val handler = onCommand ?: return@OnMessageReceivedListener
@@ -219,7 +222,27 @@ class XiaomiWearableTransport(private val context: Context) {
         }
     }
 
+    /**
+     * 查询节点，带一次重试。
+     *
+     * 官方示例是在 Activity onCreate 里立刻查，一次就成。
+     * 我们在 Service 里查，宿主服务刚连上时节点列表可能还没填充，
+     * 所以失败后等 1.5 秒再查一次——很多"空列表"是时序问题，不是真没连。
+     */
     private fun refreshNode(onResult: (String?, String) -> Unit) {
+        refreshNodeOnce { id, reason ->
+            if (id != null) {
+                onResult(id, reason)
+                return@refreshNodeOnce
+            }
+            step("节点为空，1.5 秒后重试一次")
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                refreshNodeOnce(onResult)
+            }, 1500)
+        }
+    }
+
+    private fun refreshNodeOnce(onResult: (String?, String) -> Unit) {
         val api = nodeApi
         if (api == null) {
             onResult(null, "SDK 节点 API 不可用")

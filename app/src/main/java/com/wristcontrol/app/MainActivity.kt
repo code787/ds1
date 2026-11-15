@@ -107,6 +107,33 @@ class MainActivity : Activity() {
         })
 
         root.addView(Button(this).apply {
+            text = "前台探测一次（在 Activity 里查节点）"
+            setOnClickListener {
+                // 官方示例是在 Activity 的 onCreate 里查节点就能拿到。
+                // 这里手动触发一次，用来对比「Activity 上下文」与「Service 上下文」是否有差异。
+                try {
+                    val ctx = applicationContext
+                    val api = com.xiaomi.xms.wearable.Wearable.getNodeApi(ctx)
+                    api.connectedNodes
+                        .addOnSuccessListener { nodes ->
+                            val n = nodes?.size ?: 0
+                            val first = nodes?.firstOrNull()
+                            val msg = "Activity 探测：节点数=$n 名称=${first?.name ?: "(无)"} id=${first?.id ?: "(空)"}"
+                            com.wristcontrol.app.transport.DiagnoseLog.append(this@MainActivity, msg)
+                            statusText.text = msg
+                        }
+                        .addOnFailureListener { e ->
+                            val msg = "Activity 探测失败：${e.javaClass.name} ${e.message}"
+                            com.wristcontrol.app.transport.DiagnoseLog.append(this@MainActivity, msg)
+                            statusText.text = msg
+                        }
+                } catch (t: Throwable) {
+                    statusText.text = "Activity 探测抛出：${t.javaClass.simpleName}"
+                }
+            }
+        })
+
+        root.addView(Button(this).apply {
             text = "查看诊断日志"
             setOnClickListener {
                 val path = com.wristcontrol.app.transport.DiagnoseLog.path(this@MainActivity)
