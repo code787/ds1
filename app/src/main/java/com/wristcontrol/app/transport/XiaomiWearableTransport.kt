@@ -41,6 +41,7 @@ class XiaomiWearableTransport(private val context: Context) {
     private val nodeApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getNodeApi(context) }.getOrNull() }
     private val authApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getAuthApi(context) }.getOrNull() }
     private val messageApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getMessageApi(context) }.getOrNull() }
+    private val serviceApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getServiceApi(context) }.getOrNull() }
 
     private val listener = com.xiaomi.xms.wearable.message.OnMessageReceivedListener { _, payload ->
         val handler = onCommand ?: return@OnMessageReceivedListener
@@ -77,6 +78,11 @@ class XiaomiWearableTransport(private val context: Context) {
         sdkAvailable = true
         step("SDK 已初始化")
 
+        // 必须先确认「小米运动健康」的宿主服务已连上，再去查节点。
+        // 直接查节点在宿主未绑定时会稳定返回空列表，看起来像"没有手环"，
+        // 实际是通道还没建立（导航环的通道诊断文档把这两件事分开记）。
+        registerHostListener()
+
         refreshNode { resolved, reason ->
             if (resolved == null) {
                 fail("未找到已连接的手环（${reason}）。请确认：1) 小米运动健康已登录 2) 手环已连接 3) 小米运动健康在后台运行")
@@ -98,6 +104,12 @@ class XiaomiWearableTransport(private val context: Context) {
 
     fun stop() {
         try {
+            hostListener?.let { serviceApi?.unregisterServiceConnectionListener(it) }
+            hostListener = null
+        } catch (t: Throwable) {
+            Log.w(TAG, "注销宿主监听异常: ${t.javaClass.simpleName}")
+        }
+        try {
             stopListening()
         } catch (t: Throwable) {
             Log.w(TAG, "stopListening 异常: ${t.javaClass.simpleName}")
@@ -105,6 +117,47 @@ class XiaomiWearableTransport(private val context: Context) {
         onCommand = null
         onStatus = null
         onError = null
+    }
+
+    /** 宿主服务连接监听；只用于诊断，不参与业务判断。 */
+    private var hostListener: com.xiaomi.xms.wearable.service.OnServiceConnectionListener? = null
+
+    /**
+     * 注册宿主服务连接监听，并查询 API level。
+     *
+     * 这两步是「找不到手环」时区分原因的关键：
+     * - 宿主服务没连上 → 小米运动健康没装/没登录/被冻结
+     * - 宿主连上但节点为空 → 手环没连上，或蓝牙通道被别的工具占用
+     */
+    private fun registerHostListener() {
+        val api = serviceApi
+        if (api == null) {
+            step("宿主服务 API 不可用")
+            return
+        }
+        try {
+            val listener = object : com.xiaomi.xms.wearable.service.OnServiceConnectionListener {
+                override fun onServiceConnected() {
+                    Log.i(TAG, "宿主服务已连接")
+                    step("宿主服务已连接")
+                }
+
+                override fun onServiceDisconnected() {
+                    Log.w(TAG, "宿主服务已断开")
+                    step("宿主服务已断开")
+                }
+            }
+            hostListener = listener
+            api.registerServiceConnectionListener(listener)
+
+            api.getServiceApiLevel()
+                .addOnSuccessListener { level -> step("宿主服务 API level=${level ?: "未知"}") }
+                .addOnFailureListener { e ->
+                    step("宿主服务 API 查询失败: ${e.javaClass.simpleName}")
+                }
+        } catch (t: Throwable) {
+            step("注册宿主监听失败: ${t.javaClass.simpleName}")
+        }
     }
 
     /** 分步诊断：每一步都推到界面，出问题时能看出卡在哪。 */
