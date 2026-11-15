@@ -16,7 +16,9 @@ android {
     }
 
     signingConfigs {
-        create("debug") {
+        // AGP 已内置名为 "debug" 的签名配置，只能配置不能新建，
+        // 否则报 "Cannot add a SigningConfig with name 'debug'"。
+        getByName("debug") {
             storeFile = file("signing/debug.jks")
             storePassword = "wristcontrol"
             keyAlias = "wristcontrol"
