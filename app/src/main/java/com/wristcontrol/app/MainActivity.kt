@@ -89,7 +89,7 @@ class MainActivity : Activity() {
         root.addView(Button(this).apply {
             text = "查看诊断日志"
             setOnClickListener {
-                val path = com.wristcontrol.app.transport.DiagnoseLog.path(this)
+                val path = com.wristcontrol.app.transport.DiagnoseLog.path(this@MainActivity)
                 val file = java.io.File(path)
                 if (!file.exists()) {
                     statusText.text = "还没有日志。先点「启动桥接」试一次。"

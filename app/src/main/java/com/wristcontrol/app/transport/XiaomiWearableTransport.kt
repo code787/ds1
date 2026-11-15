@@ -127,7 +127,7 @@ class XiaomiWearableTransport(private val context: Context) {
     /**
      * 检查手环上是否安装了同包名的快应用。
      *
-     * SDK 提供 isWearAppInstalled(nodeId, packageName) —— 这是区分
+     * SDK 提供 isWearAppInstalled(packageName) —— 这是区分
      * 「手环没装 App」和「证书不匹配」的关键：
      * 两者都可能表现为 signature verify failed。
      */
@@ -135,7 +135,7 @@ class XiaomiWearableTransport(private val context: Context) {
         val api = nodeApi
         if (api == null) return
         try {
-            api.isWearAppInstalled(target, context.packageName)
+            api.isWearAppInstalled(context.packageName)
                 .addOnSuccessListener { installed ->
                     DiagnoseLog.append(context, "isWearAppInstalled(${context.packageName}) = $installed")
                     step("手环快应用: ${if (installed == true) "已安装" else "未安装"}")
