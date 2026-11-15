@@ -21,6 +21,12 @@ class XiaomiWearableTransport(private val context: Context) {
 
     private companion object {
         const val TAG = "WristTransport"
+
+        /** 节点查询间隔。 */
+        const val NODE_RETRY_MS = 2_000L
+
+        /** 最多等这么久。实测宿主刚连上时要 10~20 秒才填充节点列表。 */
+        const val NODE_WAIT_MS = 30_000L
     }
 
     /** SDK 是否可用。不可用时所有操作直接返回失败，不再尝试。 */
@@ -289,17 +295,39 @@ class XiaomiWearableTransport(private val context: Context) {
      * 我们在 Service 里查，宿主服务刚连上时节点列表可能还没填充，
      * 所以失败后等 1.5 秒再查一次——很多"空列表"是时序问题，不是真没连。
      */
+    /**
+     * 查节点，带持续轮询。
+     *
+     * 实测规律：宿主服务刚连上时节点列表是空的，要等 10~20 秒才填充。
+     * 只重试一次（1.5 秒）根本不够——真机日志里第一次永远拿到 0 个。
+     * 改成每 2 秒查一次、最多 30 秒，拿到就停。
+     */
     private fun refreshNode(onResult: (String?, String) -> Unit) {
-        refreshNodeOnce { id, reason ->
-            if (id != null) {
-                onResult(id, reason)
-                return@refreshNodeOnce
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val deadline = System.currentTimeMillis() + NODE_WAIT_MS
+        var attempts = 0
+
+        fun attempt() {
+            attempts++
+            refreshNodeOnce { id, reason ->
+                if (id != null) {
+                    if (attempts > 1) {
+                        step("第 $attempts 次查询拿到节点（等了约 ${(attempts - 1) * NODE_RETRY_MS / 1000} 秒）")
+                    }
+                    onResult(id, reason)
+                    return@refreshNodeOnce
+                }
+                if (System.currentTimeMillis() >= deadline) {
+                    step("已等 ${NODE_WAIT_MS / 1000} 秒仍未拿到节点（查了 $attempts 次）")
+                    onResult(null, reason)
+                    return@refreshNodeOnce
+                }
+                if (attempts == 1) step("节点为空，持续等待（每 ${NODE_RETRY_MS / 1000} 秒一次，最多 ${NODE_WAIT_MS / 1000} 秒）")
+                handler.postDelayed({ attempt() }, NODE_RETRY_MS)
             }
-            step("节点为空，1.5 秒后重试一次")
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                refreshNodeOnce(onResult)
-            }, 1500)
         }
+
+        attempt()
     }
 
     private fun refreshNodeOnce(onResult: (String?, String) -> Unit) {
