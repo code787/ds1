@@ -100,6 +100,12 @@ class XiaomiWearableTransport(private val context: Context) {
                     // 必须在授权成功之后再调用，否则报 PermissionDeniedException。
                     checkWearAppInstalled(resolved)
                     startListening(resolved)
+
+                    // 手环页面不会自己打开，必须由手机主动拉起。
+                    // 不拉起的话手环一直停在表盘，用户看不到"未连接手机"以外的任何东西。
+                    launchWearPage(resolved)
+
+                    // 拉起后立刻推一帧状态，手环收到才会从「未连接手机」变成「已连接」。
                     safeStatus()
                 } else {
                     fail("未获得设备管理权限（${reason}）")
@@ -147,6 +153,37 @@ class XiaomiWearableTransport(private val context: Context) {
                 }
         } catch (t: Throwable) {
             DiagnoseLog.append(context, "isWearAppInstalled 抛出: ${t.javaClass.name}")
+        }
+    }
+
+    /**
+     * 拉起手环上的快应用页面。
+     *
+     * 不调用这个，手环页面根本不会出现在前台——用户看到的就是表盘，
+     * 或者手动打开后一直停在「未连接手机」。
+     *
+     * URI 用 "pages/index"（与 manifest 的 router.entry 对应）。
+     * 官方示例与导航环都用这个形式；"/pages/index" 等变体在部分固件上不生效。
+     */
+    private fun launchWearPage(target: String) {
+        val api = nodeApi
+        if (api == null) return
+        try {
+            api.launchWearApp(target, "pages/index")
+                .addOnSuccessListener {
+                    DiagnoseLog.append(context, "launchWearApp(pages/index) = ok")
+                    step("已拉起手环页面")
+                }
+                .addOnFailureListener { e ->
+                    DiagnoseLog.append(
+                        context,
+                        "launchWearApp 失败: ${e.javaClass.name} msg=${e.message}",
+                    )
+                    step("拉起手环页面失败: ${e.javaClass.simpleName}")
+                }
+        } catch (t: Throwable) {
+            DiagnoseLog.append(context, "launchWearApp 抛出: ${t.javaClass.name}")
+            step("拉起手环页面抛出: ${t.javaClass.simpleName}")
         }
     }
 
@@ -212,7 +249,32 @@ class XiaomiWearableTransport(private val context: Context) {
         }
     }
 
+    /**
+     * 推一帧状态给手环，再回调界面。
+     *
+     * 手环页面收到第一帧才会从「未连接手机」变成「已连接」。
+     * 只回调不发帧，手环会一直停在未连接——之前就是这个毛病。
+     */
     private fun safeStatus() {
+        try {
+            val battery = try {
+                val bm = context.getSystemService(Context.BATTERY_SERVICE) as? android.os.BatteryManager
+                bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+            } catch (t: Throwable) {
+                -1
+            }
+            val payload = com.wristcontrol.app.protocol.StatusCodec.encode(
+                id = "st-${System.currentTimeMillis()}",
+                link = if (hasNode()) "connected" else "disconnected",
+                battery = battery,
+                listening = true,
+            )
+            val ok = sendRaw(payload)
+            DiagnoseLog.append(context, "推送状态帧 -> ${if (ok) "已交给通道" else "失败"}")
+        } catch (t: Throwable) {
+            Log.w(TAG, "推送状态帧异常: ${t.javaClass.simpleName}")
+        }
+
         try {
             onStatus?.invoke()
         } catch (t: Throwable) {
