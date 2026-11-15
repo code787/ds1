@@ -75,17 +75,22 @@ class XiaomiWearableTransport(private val context: Context) {
             return
         }
         sdkAvailable = true
-        refreshNode { resolved ->
+        step("SDK 已初始化")
+
+        refreshNode { resolved, reason ->
             if (resolved == null) {
-                fail("没有找到已连接的手环")
+                fail("未找到已连接的手环（${reason}）。请确认：1) 小米运动健康已登录 2) 手环已连接 3) 小米运动健康在后台运行")
                 return@refreshNode
             }
-            requestPermission { granted ->
+            step("找到节点 ${resolved.take(8)}…")
+
+            requestPermission { granted, reason ->
                 if (granted) {
+                    step("设备管理权限已授予")
                     startListening(resolved)
                     safeStatus()
                 } else {
-                    fail("未获得设备管理权限。请确认：1) 小米运动健康已安装并登录 2) 手环已连接 3) 弹出授权框时点允许")
+                    fail("未获得设备管理权限（${reason}）")
                 }
             }
         }
@@ -100,6 +105,16 @@ class XiaomiWearableTransport(private val context: Context) {
         onCommand = null
         onStatus = null
         onError = null
+    }
+
+    /** 分步诊断：每一步都推到界面，出问题时能看出卡在哪。 */
+    private fun step(message: String) {
+        Log.i(TAG, "步骤: $message")
+        try {
+            onError?.invoke("步骤: $message")
+        } catch (t: Throwable) {
+            // 诊断失败不能影响主流程
+        }
     }
 
     private fun fail(message: String) {
@@ -119,10 +134,10 @@ class XiaomiWearableTransport(private val context: Context) {
         }
     }
 
-    private fun refreshNode(onResult: (String?) -> Unit) {
+    private fun refreshNode(onResult: (String?, String) -> Unit) {
         val api = nodeApi
         if (api == null) {
-            onResult(null)
+            onResult(null, "SDK 节点 API 不可用")
             return
         }
         try {
@@ -130,18 +145,18 @@ class XiaomiWearableTransport(private val context: Context) {
                 .addOnSuccessListener { nodes: List<com.xiaomi.xms.wearable.node.Node>? ->
                     val first = nodes?.firstOrNull()
                     nodeId = first?.id
-                    Log.i(TAG, "节点: ${first?.name ?: "(无)"} id=${nodeId ?: "(空)"}")
-                    onResult(nodeId)
+                    Log.i(TAG, "节点: ${first?.name ?: "(无)"} id=${nodeId ?: "(空)"} 共${nodes?.size ?: 0}个")
+                    onResult(nodeId, if (nodes.isNullOrEmpty()) "节点列表为空（${nodes?.size ?: 0} 个）" else "ok")
                 }
                 .addOnFailureListener { error ->
                     nodeId = null
                     Log.w(TAG, "getConnectedNodes 失败: ${error.javaClass.simpleName} ${error.message}")
-                    onResult(null)
+                    onResult(null, "getConnectedNodes 失败: ${error.javaClass.simpleName}")
                 }
         } catch (t: Throwable) {
             nodeId = null
             Log.w(TAG, "getConnectedNodes 抛出: ${t.javaClass.simpleName}")
-            onResult(null)
+            onResult(null, "getConnectedNodes 抛出: ${t.javaClass.simpleName}")
         }
     }
 
@@ -153,9 +168,17 @@ class XiaomiWearableTransport(private val context: Context) {
      * - requestPermission 返回 Array<Permission>（本次被授予的权限列表）
      * 把后者当 Boolean 用会编译失败：Operator '==' cannot be applied to Array<Permission> and Boolean。
      */
-    private fun requestPermission(onResult: (Boolean) -> Unit) {
-        val target = nodeId ?: return onResult(false)
-        val api = authApi ?: return onResult(false)
+    private fun requestPermission(onResult: (Boolean, String) -> Unit) {
+        val target = nodeId
+        if (target == null) {
+            onResult(false, "没有节点 id，跳过权限请求")
+            return
+        }
+        val api = authApi
+        if (api == null) {
+            onResult(false, "SDK 权限 API 不可用")
+            return
+        }
 
         // SDK 的 Task 回调不保证在主线程，而 requestPermission 会弹系统授权对话框。
         // 统一切回主线程，避免"对话框没弹出来却报了未授予"。
@@ -165,8 +188,8 @@ class XiaomiWearableTransport(private val context: Context) {
             api.checkPermission(target, com.xiaomi.xms.wearable.auth.Permission.DEVICE_MANAGER)
                 .addOnSuccessListener { already ->
                     if (already == true) {
-                        Log.i(TAG, "设备管理权限：已授予")
-                        main.post { onResult(true) }
+                        Log.i(TAG, "设备管理权限：已授予（无需请求）")
+                        main.post { onResult(true, "已授予") }
                     } else {
                         Log.i(TAG, "设备管理权限未授予，发起请求（手机应弹出授权框）")
                         main.post {
@@ -177,28 +200,26 @@ class XiaomiWearableTransport(private val context: Context) {
                                         // 逐个比对枚举会因为 SDK 返回的实例不同而误判。
                                         val ok = grantedList != null && grantedList.isNotEmpty()
                                         Log.i(TAG, "requestPermission 返回 ${grantedList?.size ?: 0} 项 -> ${if (ok) "已授予" else "未授予"}")
-                                        main.post { onResult(ok) }
+                                        main.post { onResult(ok, if (ok) "请求后已授予" else "请求返回空列表（用户拒绝或未弹框）") }
                                     }
                                     .addOnFailureListener { error ->
                                         Log.w(TAG, "requestPermission 失败: ${error.javaClass.simpleName} ${error.message}")
-                                        main.post { onResult(false) }
+                                        main.post { onResult(false, "requestPermission 失败: ${error.javaClass.simpleName}") }
                                     }
                             } catch (t: Throwable) {
                                 Log.w(TAG, "requestPermission 抛出: ${t.javaClass.simpleName}")
-                                main.post { onResult(false) }
+                                main.post { onResult(false, "requestPermission 抛出: ${t.javaClass.simpleName}") }
                             }
                         }
                     }
                 }
                 .addOnFailureListener { error ->
                     Log.w(TAG, "checkPermission 失败: ${error.javaClass.simpleName} ${error.message}")
-                    // 把原始异常名带上，否则用户只看到"未获得权限"无法判断是 SDK 报错还是真没授权
-                    main.post { onError?.invoke("权限检查失败：${error.javaClass.simpleName}") }
-                    main.post { onResult(false) }
+                    main.post { onResult(false, "checkPermission 失败: ${error.javaClass.simpleName}") }
                 }
         } catch (t: Throwable) {
             Log.w(TAG, "权限检查抛出: ${t.javaClass.simpleName}")
-            onResult(false)
+            onResult(false, "checkPermission 抛出: ${t.javaClass.simpleName}")
         }
     }
 
