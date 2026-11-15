@@ -68,23 +68,33 @@ class XiaomiWearableTransport private constructor(private val context: Context) 
     private val messageApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getMessageApi(appContext) }.getOrNull() }
     private val serviceApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getServiceApi(appContext) }.getOrNull() }
 
-    private val listener = com.xiaomi.xms.wearable.message.OnMessageReceivedListener { _, payload ->
-        val handler = onCommand ?: return@OnMessageReceivedListener
+    private val listener = com.xiaomi.xms.wearable.message.OnMessageReceivedListener { fromNode, payload ->
+        // 先记原始帧：手环到底发没发过来，靠这一行判断
+        DiagnoseLog.append(context, "收到消息 from=$fromNode 字节数=${payload?.size ?: 0}")
+
+        val handler = onCommand
+        if (handler == null) {
+            DiagnoseLog.append(context, "  -> 丢弃：onCommand 未注册")
+            return@OnMessageReceivedListener
+        }
         val text = try {
             String(payload, Charsets.UTF_8)
         } catch (t: Throwable) {
-            Log.w(TAG, "payload 解码失败: ${t.message}")
+            DiagnoseLog.append(context, "  -> payload 解码失败: ${t.message}")
             return@OnMessageReceivedListener
         }
+        DiagnoseLog.append(context, "  内容=$text")
+
         val command = Command.decode(text)
         if (command == null) {
-            Log.w(TAG, "无法识别的指令: $text")
+            DiagnoseLog.append(context, "  -> 无法识别的指令")
             return@OnMessageReceivedListener
         }
+        DiagnoseLog.append(context, "  解析为: ${command.javaClass.simpleName}")
         try {
             handler(command)
         } catch (t: Throwable) {
-            Log.w(TAG, "处理指令失败: ${t.javaClass.simpleName}")
+            DiagnoseLog.append(context, "  -> 处理异常: ${t.javaClass.simpleName}")
         }
     }
 

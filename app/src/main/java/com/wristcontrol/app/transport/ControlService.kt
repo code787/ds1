@@ -138,10 +138,15 @@ class ControlService : Service() {
 
     private fun handleCommand(command: Command) {
         if (command is Command.Ack) {
-            Log.d(TAG, "手环确认收到: ${command.refId}")
+            DiagnoseLog.append(this, "指令: ack(${command.refId}) 不执行动作")
             return
         }
-        if (command is Command.Ping) return
+        if (command is Command.Ping) {
+            DiagnoseLog.append(this, "指令: ping 不执行动作")
+            return
+        }
+        DiagnoseLog.append(this, "执行指令: ${command.javaClass.simpleName}")
+        DiagnoseLog.append(this, "  无障碍服务就绪=${ControlAccessibilityService.Access.isReady()}")
 
         val lock = try {
             power?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WristControl:cmd")
@@ -175,6 +180,7 @@ class ControlService : Service() {
             }
         }
 
+        DiagnoseLog.append(this, "  执行结果=$executed")
         // 只有真的执行成功才回执，失败不回执，手环会停在"已发送…"
         if (executed) ack()
     }
