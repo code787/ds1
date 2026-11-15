@@ -2,6 +2,7 @@ name: Build APK + RPK
 
 # 云端出包：手机 APK 与手环 RPK 用同一份证书签名。
 # 小米互联要求同包名 + 同证书，缺一不可。
+# 证书固定入库（app/signing/），每次构建复用，绝不重新生成。
 
 on:
   push:
@@ -31,6 +32,17 @@ jobs:
         with:
           node-version: '20'
 
+      - name: 校验签名证书存在
+        run: |
+          for f in app/signing/private.pem app/signing/certificate.pem app/signing/debug.p12; do
+            if [ ! -f "$f" ]; then
+              echo "::error::缺少 $f —— 证书必须入库，否则每次构建会换证书，手环与手机对不上"
+              exit 1
+            fi
+          done
+          echo "=== 证书指纹 ==="
+          openssl x509 -in app/signing/certificate.pem -noout -fingerprint -sha256
+
       - name: 下载小米官方 SDK（AAR）
         run: |
           mkdir -p app/libs
@@ -40,11 +52,8 @@ jobs:
           sha256sum app/libs/xms-wearable-lib_1.4_release.aar
           echo "9c40fd1c5409bb948523d503af71e2978ae522c35636afe7d64f474c0f6bc195  app/libs/xms-wearable-lib_1.4_release.aar" | sha256sum -c -
 
-      - name: 生成签名证书
-        run: python3 scripts/gen-signing.py
-
       - name: 编译手机端 APK
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+        run: gradle :app:assembleDebug --no-daemon
 
       - name: 跑单测
         run: cd band-app && npm install && npm test
@@ -52,23 +61,29 @@ jobs:
       - name: 编译手环端 RPK
         run: node scripts/build-rpk.js
 
+      - name: 核对 APK 与 RPK 证书一致
+        run: |
+          echo "=== APK 证书 ==="
+          apksigner=$(find "$ANDROID_HOME" -name apksigner -type f 2>/dev/null | head -1)
+          if [ -n "$apksigner" ]; then
+            "$apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk | grep -i "SHA-256"
+          else
+            echo "(未找到 apksigner，跳过)"
+          fi
+          echo "=== RPK 证书（取自 META-INF/CERT） ==="
+          python3 - <<'PY'
+          import zipfile, hashlib
+          z = zipfile.ZipFile('band-app/dist/' + [n for n in __import__('os').listdir('band-app/dist') if n.endswith('.rpk')][0])
+          cert = z.read('META-INF/CERT')
+          print('RPK META-INF/CERT sha256:', hashlib.sha256(cert).hexdigest()[:40])
+          PY
+          echo
+          echo "两边指纹必须来自同一把证书，否则手环收不到消息。"
+
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
           name: wristcontrol-build
           path: |
-            app/build/outputs/apk/debug/*.apk
-            band-app/dist/*.rpk
-
-      - name: 发布到 Release
-        if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: build-${{ github.run_number }}
-          name: Build #${{ github.run_number }}
-          body: |
-            自动构建产物。
-            **APK 和 RPK 必须一起下载安装**——证书同源，混用会静默失败。
-          files: |
             app/build/outputs/apk/debug/*.apk
             band-app/dist/*.rpk

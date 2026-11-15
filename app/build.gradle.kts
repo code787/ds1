@@ -16,10 +16,12 @@ android {
     }
 
     signingConfigs {
-        // AGP 已内置名为 "debug" 的签名配置，只能配置不能新建，
-        // 否则报 "Cannot add a SigningConfig with name 'debug'"。
-        getByName("debug") {
-            storeFile = file("signing/debug.jks")
+        // 用独立命名的配置，不改写 AGP 内置的 debug 配置。
+        // 证书固定为 app/signing/debug.p12，与手环 RPK 同源——
+        // 小米互联要求 APK 与 RPK 同包名同证书，换一次证书就要两个一起重装。
+        create("wristDebug") {
+            storeFile = file("signing/debug.p12")
+            storeType = "PKCS12"
             storePassword = "wristcontrol"
             keyAlias = "wristcontrol"
             keyPassword = "wristcontrol"
@@ -28,8 +30,7 @@ android {
 
     buildTypes {
         getByName("debug") {
-            // 手环端 RPK 必须用同一份证书签名，否则收不到消息
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("wristDebug")
         }
     }
 
@@ -43,6 +44,5 @@ android {
 }
 
 dependencies {
-    // 小米官方手机端 SDK，需自行放入 app/libs/（见 docs/BUILD.md）
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
 }

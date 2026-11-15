@@ -1,10 +1,3 @@
-# 签名证书（绝不入库）
-app/signing/
-band-app/sign/
-*.jks
-*.p12
-*.pem
-
 # 构建产物
 app/build/
 band-app/dist/
@@ -16,6 +9,15 @@ local.properties
 
 # 小米官方 SDK（不随仓库分发）
 app/libs/*.aar
+
+# 签名证书：**故意入库**。
+# 小米互联要求 APK 与 RPK 同包名同证书，证书一换两个包就都得重装。
+# 每次 CI 重新生成会导致手环上的 RPK 与手机上的 APK 对不上
+# （报 SignatureVerifyFailedException，且没有别的提示）。
+# 这是调试证书，只用于个人自用，不是生产密钥。
+!app/signing/private.pem
+!app/signing/certificate.pem
+!app/signing/debug.p12
 
 # Python 缓存
 __pycache__/
