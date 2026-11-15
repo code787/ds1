@@ -96,7 +96,14 @@ class XiaomiWearableTransport(private val context: Context) {
         }
     }
 
-    /** 自定义消息通道需要 DEVICE_MANAGER 权限，未授予时先请求。 */
+    /**
+     * 自定义消息通道需要 DEVICE_MANAGER 权限，未授予时先请求。
+     *
+     * 注意 SDK 的两个 Task 返回类型不同：
+     * - checkPermission 返回 Boolean（是否已授予）
+     * - requestPermission 返回 Array<Permission>（本次被授予的权限列表）
+     * 把后者当 Boolean 用会编译失败：Operator '==' cannot be applied to Array<Permission> and Boolean。
+     */
     private fun requestPermission(onResult: (Boolean) -> Unit) {
         val target = nodeId ?: return onResult(false)
         try {
@@ -106,7 +113,14 @@ class XiaomiWearableTransport(private val context: Context) {
                         onResult(true)
                     } else {
                         authApi.requestPermission(target, Permission.DEVICE_MANAGER)
-                            .addOnSuccessListener { ok -> onResult(ok == true) }
+                            .addOnSuccessListener { grantedList ->
+                                // 请求成功不代表一定授予；以返回列表里是否含该权限为准。
+                                val grantedNow = grantedList?.any { it == Permission.DEVICE_MANAGER } == true
+                                if (!grantedNow) {
+                                    Log.w(TAG, "requestPermission 返回的列表里没有 DEVICE_MANAGER")
+                                }
+                                onResult(grantedNow)
+                            }
                             .addOnFailureListener { error ->
                                 Log.w(TAG, "requestPermission 失败: ${error.message}")
                                 onResult(false)
