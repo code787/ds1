@@ -86,6 +86,26 @@ class MainActivity : Activity() {
             setOnClickListener { showLogHint() }
         })
 
+        root.addView(Button(this).apply {
+            text = "查看诊断日志"
+            setOnClickListener {
+                val path = com.wristcontrol.app.transport.DiagnoseLog.path(this)
+                val file = java.io.File(path)
+                if (!file.exists()) {
+                    statusText.text = "还没有日志。先点「启动桥接」试一次。"
+                } else {
+                    try {
+                        val text = file.readText()
+                        // 只显示最后 60 行，避免撑爆界面
+                        val tail = text.lines().takeLast(60).joinToString("\n")
+                        statusText.text = "日志路径：\n$path\n\n—— 最后 60 行 ——\n$tail"
+                    } catch (t: Throwable) {
+                        statusText.text = "读日志失败：${t.javaClass.simpleName}"
+                    }
+                }
+            }
+        })
+
         statusText = TextView(this).apply {
             textSize = 14f
             setPadding(0, 40, 0, 0)

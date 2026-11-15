@@ -90,6 +90,11 @@ class XiaomiWearableTransport(private val context: Context) {
             }
             step("找到节点 ${resolved.take(8)}…")
 
+            // 手环上有没有装我们这个快应用？
+            // 没装的话后续 checkPermission 会报 signature verify failed，
+            // 看起来像证书问题，实际是包不在手环上。
+            checkWearAppInstalled(resolved)
+
             requestPermission { granted, reason ->
                 if (granted) {
                     step("设备管理权限已授予")
@@ -117,6 +122,31 @@ class XiaomiWearableTransport(private val context: Context) {
         onCommand = null
         onStatus = null
         onError = null
+    }
+
+    /**
+     * 检查手环上是否安装了同包名的快应用。
+     *
+     * SDK 提供 isWearAppInstalled(nodeId, packageName) —— 这是区分
+     * 「手环没装 App」和「证书不匹配」的关键：
+     * 两者都可能表现为 signature verify failed。
+     */
+    private fun checkWearAppInstalled(target: String) {
+        val api = nodeApi
+        if (api == null) return
+        try {
+            api.isWearAppInstalled(target, context.packageName)
+                .addOnSuccessListener { installed ->
+                    DiagnoseLog.append(context, "isWearAppInstalled(${context.packageName}) = $installed")
+                    step("手环快应用: ${if (installed == true) "已安装" else "未安装"}")
+                }
+                .addOnFailureListener { e ->
+                    DiagnoseLog.append(context, "isWearAppInstalled 失败: ${e.javaClass.name} msg=${e.message}")
+                    step("手环快应用检查失败: ${e.javaClass.simpleName}")
+                }
+        } catch (t: Throwable) {
+            DiagnoseLog.append(context, "isWearAppInstalled 抛出: ${t.javaClass.name}")
+        }
     }
 
     /** 宿主服务连接监听；只用于诊断，不参与业务判断。 */
@@ -160,9 +190,10 @@ class XiaomiWearableTransport(private val context: Context) {
         }
     }
 
-    /** 分步诊断：每一步都推到界面，出问题时能看出卡在哪。 */
+    /** 分步诊断：每一步都同时推到界面和日志文件。 */
     private fun step(message: String) {
         Log.i(TAG, "步骤: $message")
+        DiagnoseLog.append(context, "步骤: $message")
         try {
             onError?.invoke("步骤: $message")
         } catch (t: Throwable) {
@@ -172,6 +203,7 @@ class XiaomiWearableTransport(private val context: Context) {
 
     private fun fail(message: String) {
         Log.w(TAG, message)
+        DiagnoseLog.append(context, "失败: $message")
         try {
             onError?.invoke(message)
         } catch (t: Throwable) {
@@ -198,12 +230,16 @@ class XiaomiWearableTransport(private val context: Context) {
                 .addOnSuccessListener { nodes: List<com.xiaomi.xms.wearable.node.Node>? ->
                     val first = nodes?.firstOrNull()
                     nodeId = first?.id
-                    Log.i(TAG, "节点: ${first?.name ?: "(无)"} id=${nodeId ?: "(空)"} 共${nodes?.size ?: 0}个")
+                    val detail = "节点数=${nodes?.size ?: 0} 名称=${first?.name ?: "(无)"} id=${nodeId ?: "(空)"}"
+                    DiagnoseLog.append(context, "getConnectedNodes -> $detail")
+                    nodes?.forEachIndexed { i, n ->
+                        DiagnoseLog.append(context, "  节点[$i] name=${n.name} id=${n.id}")
+                    }
                     onResult(nodeId, if (nodes.isNullOrEmpty()) "节点列表为空（${nodes?.size ?: 0} 个）" else "ok")
                 }
                 .addOnFailureListener { error ->
                     nodeId = null
-                    Log.w(TAG, "getConnectedNodes 失败: ${error.javaClass.simpleName} ${error.message}")
+                    DiagnoseLog.append(context, "getConnectedNodes 失败: ${error.javaClass.name} msg=${error.message}")
                     onResult(null, "getConnectedNodes 失败: ${error.javaClass.simpleName}")
                 }
         } catch (t: Throwable) {
@@ -267,7 +303,10 @@ class XiaomiWearableTransport(private val context: Context) {
                     }
                 }
                 .addOnFailureListener { error ->
-                    Log.w(TAG, "checkPermission 失败: ${error.javaClass.simpleName} ${error.message}")
+                    DiagnoseLog.append(
+                        context,
+                        "checkPermission 失败: ${error.javaClass.name} msg=${error.message}",
+                    )
                     main.post { onResult(false, "checkPermission 失败: ${error.javaClass.simpleName}") }
                 }
         } catch (t: Throwable) {
