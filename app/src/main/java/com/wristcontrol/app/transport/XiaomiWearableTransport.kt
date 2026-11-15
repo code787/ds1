@@ -93,14 +93,12 @@ class XiaomiWearableTransport(private val context: Context) {
             }
             step("找到节点 ${resolved.take(8)}…")
 
-            // 手环上有没有装我们这个快应用？
-            // 没装的话后续 checkPermission 会报 signature verify failed，
-            // 看起来像证书问题，实际是包不在手环上。
-            checkWearAppInstalled(resolved)
-
             requestPermission { granted, reason ->
                 if (granted) {
                     step("设备管理权限已授予")
+                    // isWearAppInstalled 需要 DEVICE_MANAGER 权限，
+                    // 必须在授权成功之后再调用，否则报 PermissionDeniedException。
+                    checkWearAppInstalled(resolved)
                     startListening(resolved)
                     safeStatus()
                 } else {
