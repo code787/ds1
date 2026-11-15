@@ -1,110 +1,148 @@
 <script>
 const interconnect = require("@system.interconnect");
 const vibrator = require("@system.vibrator");
-const { parseFrame } = require("./common/protocol");
-
-const connect = interconnect.instance();
-const SEND_RETRY = 2;
 
 /**
- * 与手机的链路层（CommonJS）。
+ * 手环端链路层。
  *
- * 收到的帧有两种：
- * - kind=status：手机状态（链路、电量、手势服务是否开启）
- * - kind=ack   ：手机确认收到某条指令
+ * 官方 interconnect 的用法（照抄自小米官方示例与导航环实测通过的实现）：
+ * - 监听：connect.onmessage = (event) => {}   是**属性赋值**，不是方法调用
+ * - 发送：connect.send({ data, success, fail })   必须带回调对象
+ * - 生命周期：onopen / onclose / onerror 也是属性赋值
  *
- * 约束：
- * - 收到 status 立刻回 ack，让手机知道链路活着；
- * - 发送失败重试次数有上限，避免堆积；
- * - 震动失败不影响功能。
+ * 之前写成 onMessage(cb) / send(str)，运行时根本不会收到消息，
+ * 表现为手环一直显示「未连接手机」——手机端发什么都没人接。
+ *
+ * event 的形状是 { data: ... }，data 可能是字符串也可能是对象，两种都要接。
  */
 export default {
-  onCreate() {
-    this.page = null;
-    this.link = "connecting";
-    this.battery = -1;
-    this.listening = false;
+  onLink: "unknown",
+  battery: -1,
+  listening: false,
+  page: null,
 
-    this._onMessage = (payload) => this.handleFrame(payload);
+  onCreate() {
     try {
-      connect.onMessage(this._onMessage);
+      const connect = interconnect.instance();
+      this._connect = connect;
+
+      // ---- 收消息 ----
+      connect.onmessage = (event) => {
+        try {
+          const data = event && event.data !== undefined ? event.data : event;
+          let decoded = data;
+          if (typeof data === "string") {
+            try {
+              decoded = JSON.parse(data);
+            } catch (e) {
+              decoded = null;
+            }
+          }
+          if (!decoded || typeof decoded !== "object") return;
+          this._handleFrame(decoded);
+        } catch (err) {
+          // 单帧解析失败不能影响后续帧
+        }
+      };
+
+      // ---- 链路状态 ----
+      connect.onopen = () => {
+        this.onLink = "connected";
+        this._push();
+      };
+      connect.onclose = () => {
+        this.onLink = "disconnected";
+        this._push();
+      };
+      connect.onerror = () => {
+        this.onLink = "error";
+        this._push();
+      };
     } catch (e) {
-      console.error("onMessage 注册失败", e);
+      this.onLink = "unavailable";
     }
   },
 
   onDestroy() {
+    const connect = this._connect;
+    if (!connect) return;
     try {
-      connect.offMessage(this._onMessage);
+      connect.onmessage = null;
+      connect.onopen = null;
+      connect.onclose = null;
+      connect.onerror = null;
     } catch (e) {
       // 解绑失败不影响退出
     }
   },
 
+  _handleFrame(frame) {
+    if (frame.kind === "status") {
+      this.onLink = frame.link === "connected" ? "connected" : "disconnected";
+      this.battery = typeof frame.battery === "number" ? frame.battery : -1;
+      this.listening = frame.listening === true;
+      this._push();
+      this._ack(frame.id);
+      return;
+    }
+    if (frame.kind === "ack") {
+      if (this.page && typeof this.page.onAck === "function") {
+        this.page.onAck(frame.refId);
+      }
+    }
+  },
+
+  _ack(refId) {
+    this.send({ t: "ack", refId: refId || "status" });
+  },
+
+  _push() {
+    if (this.page && typeof this.page.onStatus === "function") {
+      this.page.onStatus({
+        link: this.onLink,
+        battery: this.battery,
+        listening: this.listening,
+      });
+    }
+  },
+
+  /** 页面注册自己，用于接收状态与回执。 */
   attachPage(page) {
     this.page = page;
-    this.pushStatus();
+    this._push();
   },
 
   detachPage() {
     this.page = null;
   },
 
-  handleFrame(payload) {
-    const frame = parseFrame(payload);
-    if (!frame) return;
-
-    if (frame.kind === "ack") {
-      if (this.page) this.page.onAck(frame.refId);
-      return;
-    }
-
-    this.link = frame.link;
-    this.battery = frame.battery;
-    this.listening = frame.listening;
-    this.pushStatus();
-    this.ack(frame.id);
-  },
-
-  ack(refId) {
-    try {
-      connect.send(JSON.stringify({ t: "ack", refId: refId || "status" }));
-    } catch (e) {
-      // ack 失败无需处理，下一次心跳会重新确认链路
-    }
-  },
-
-  pushStatus() {
-    if (!this.page) return;
-    this.page.onStatus({
-      link: this.link,
-      battery: this.battery,
-      listening: this.listening,
-    });
-  },
-
-  /** 发送一条指令。返回 true 表示已交给链路层（不代表手机执行成功）。 */
+  /**
+   * 发送一条指令。
+   *
+   * 官方签名是 send({ data, success, fail })，不能直接传字符串。
+   * 返回 true 只表示已交给链路层，不代表手机执行成功。
+   */
   send(cmd) {
-    const text = JSON.stringify(cmd);
-    for (let i = 0; i <= SEND_RETRY; i++) {
-      try {
-        connect.send(text);
-        return true;
-      } catch (e) {
-        if (i === SEND_RETRY) {
-          console.error("发送失败", e);
-          return false;
-        }
-      }
+    const connect = this._connect;
+    if (!connect) return false;
+    try {
+      connect.send({
+        data: JSON.stringify(cmd),
+        success() {},
+        fail() {},
+      });
+      return true;
+    } catch (e) {
+      return false;
     }
-    return false;
   },
 
+  /** 轻震反馈；失败静默，不影响功能。 */
   buzz() {
     try {
-      vibrator.start({ mode: "short", count: 1 });
+      vibrator.vibrate({ mode: "short" });
     } catch (e) {
-      // 手环不支持震动时不影响功能
+      // 手环不支持震动时忽略
     }
   },
 };

@@ -1,77 +1,57 @@
 <template>
   <div class="page">
-    <!-- 顶部状态条：链路 + 手机电量 -->
     <div class="status">
       <text class="dot {{ linkOk ? 'dot-ok' : 'dot-bad' }}">{{ linkOk ? '●' : '○' }}</text>
       <text class="status-text">{{ statusText }}</text>
       <text class="battery" if="{{ batteryVisible }}">{{ batteryText }}</text>
     </div>
 
-    <!-- 触摸板：四向滑动 + 点击 -->
-    <div class="pad"
-         onswipe="onSwipe"
-         onclick="onTap">
+    <div class="pad" onswipe="onSwipe" onclick="onTap">
       <text class="pad-hint">{{ padHint }}</text>
     </div>
 
-    <!-- 底部三键 -->
     <div class="keys">
-      <div class="key" onclick="onBack">
-        <text class="key-label">返回</text>
-      </div>
-      <div class="key" onclick="onHome">
-        <text class="key-label">主页</text>
-      </div>
-      <div class="key" onclick="onRecents">
-        <text class="key-label">多任务</text>
-      </div>
+      <div class="key" onclick="onBack"><text class="key-label">返回</text></div>
+      <div class="key" onclick="onHome"><text class="key-label">主页</text></div>
+      <div class="key" onclick="onRecents"><text class="key-label">多任务</text></div>
     </div>
   </div>
 </template>
 
 <script>
-const { CMD } = require("../../common/protocol");
-
-/** 滑动阈值：小于这个位移视为误触，不发送。 */
-const MIN_SWIPE = 12;
-/** 指令发送后的静默期，避免手环连续触发导致手机端手势打架。 */
+/** 同一方向的滑动在冷却期内不重复发送。 */
 const COOLDOWN_MS = 120;
 
 export default {
   data: {
-    pending: false,
     linkOk: false,
     statusText: "正在连接",
     batteryVisible: false,
     batteryText: "",
-    padHint: "滑动 / 点击",
+    padHint: "等待手机连接",
   },
 
   onInit() {
     this._lastSendAt = 0;
-    this._lastSwipe = null;
+    this._lastSwipe = "";
   },
 
   onShow() {
+    // $app.$def 是 app.ux 导出的那个对象，页面与 app 共享同一实例
     const app = this.$app.$def;
-    app.attachPage(this);
+    if (app && typeof app.attachPage === "function") {
+      app.attachPage(this);
+    }
   },
 
   onHide() {
-    this.$app.$def.detachPage();
+    const app = this.$app.$def;
+    if (app && typeof app.detachPage === "function") app.detachPage();
   },
 
   onDestroy() {
-    this.$app.$def.detachPage();
-  },
-
-  /** 由 app.ux 推送手机回执。用于消掉"等待确认"状态。 */
-  onAck(refId) {
-    if (this.pending === true) {
-      this.pending = false;
-      const hint = this.listening ? "滑动 / 点击" : "请先在手机开启手势服务";
-      if (this.padHint !== hint) this.padHint = hint;
-    }
+    const app = this.$app.$def;
+    if (app && typeof app.detachPage === "function") app.detachPage();
   },
 
   /** 由 app.ux 推送链路状态。 */
@@ -82,7 +62,9 @@ export default {
     if (this.linkOk !== linkOk) this.linkOk = linkOk;
 
     let text;
-    if (!linkOk) {
+    if (status.link === "unknown") {
+      text = "正在连接";
+    } else if (!linkOk) {
       text = "未连接手机";
     } else if (!listening) {
       text = "手机手势服务未开";
@@ -98,81 +80,75 @@ export default {
       if (this.batteryText !== batteryText) this.batteryText = batteryText;
     }
 
-    const padHint = listening ? "滑动 / 点击" : "请先在手机开启手势服务";
+    const padHint = linkOk && listening ? "滑动 / 点击" : "等待手机连接";
     if (this.padHint !== padHint) this.padHint = padHint;
   },
 
-  /**
-   * 四向滑动 → 相对位移。
-   *
-   * 方向约定按触摸板直觉：手指在板上往下划，内容向上走，所以 dy 取负。
-   */
-  onSwipe(event) {
-    if (!this._ready()) return;
+  /** 由 app.ux 推送手机回执。 */
+  onAck(refId) {
+    if (this.padHint === "已发送…") {
+      this.padHint = this.linkOk ? "滑动 / 点击" : "等待手机连接";
+    }
+  },
 
+  onSwipe(event) {
+    if (!this.linkOk) {
+      this.buzz();
+      return;
+    }
     const direction = event && event.direction;
     let dx = 0;
     let dy = 0;
-    switch (direction) {
-      case "up": dy = -1; break;
-      case "down": dy = 1; break;
-      case "left": dx = -1; break;
-      case "right": dx = 1; break;
-      default: return;
-    }
+    if (direction === "up") dy = -1;
+    else if (direction === "down") dy = 1;
+    else if (direction === "left") dx = -1;
+    else if (direction === "right") dx = 1;
+    else return;
 
-    // 防抖：同一方向在冷却期内不重复发送
     const now = Date.now();
     if (this._lastSwipe === direction && now - this._lastSendAt < COOLDOWN_MS) return;
-
     this._lastSwipe = direction;
-    this._send(CMD.move(dx, dy));
+    this._send({ t: "move", dx: dx, dy: dy });
   },
 
   onTap() {
-    if (!this._ready()) return;
-    this._lastSwipe = null;
-    this._send(CMD.tap());
+    if (!this.linkOk) {
+      this.buzz();
+      return;
+    }
+    this._lastSwipe = "";
+    this._send({ t: "tap" });
   },
 
   onBack() {
-    if (!this._ready()) return;
-    this._send(CMD.back());
+    if (!this.linkOk) return;
+    this._send({ t: "back" });
   },
 
   onHome() {
-    if (!this._ready()) return;
-    this._send(CMD.home());
+    if (!this.linkOk) return;
+    this._send({ t: "home" });
   },
 
   onRecents() {
-    if (!this._ready()) return;
-    this._send(CMD.recents());
-  },
-
-  _ready() {
-    if (!this.linkOk) {
-      this.buzz();
-      return false;
-    }
-    return true;
+    if (!this.linkOk) return;
+    this._send({ t: "recents" });
   },
 
   _send(cmd) {
-    const now = Date.now();
-    this._lastSendAt = now;
-    const ok = this.$app.$def.send(cmd);
+    this._lastSendAt = Date.now();
+    const app = this.$app.$def;
+    if (!app || typeof app.send !== "function") return;
+    const ok = app.send(cmd);
     if (ok) {
-      // 进入"等待确认"：回执到了才恢复提示
-      if (this.pending !== true) this.pending = true;
-      if (this.padHint !== "已发送…") this.padHint = "已发送…";
+      this.padHint = "已发送…";
       this.buzz();
     }
-    return ok;
   },
 
   buzz() {
-    this.$app.$def.buzz();
+    const app = this.$app.$def;
+    if (app && typeof app.buzz === "function") app.buzz();
   },
 };
 </script>
@@ -185,7 +161,6 @@ export default {
   background-color: #000000;
   padding: 6px;
 }
-
 .status {
   flex-direction: row;
   align-items: center;
@@ -193,26 +168,11 @@ export default {
   padding-left: 4px;
   padding-right: 4px;
 }
-
-.dot {
-  font-size: 16px;
-  margin-right: 6px;
-}
-
+.dot { font-size: 16px; margin-right: 6px; }
 .dot-ok { color: #00ff99; }
 .dot-bad { color: #ff5555; }
-
-.status-text {
-  font-size: 15px;
-  color: #cccccc;
-  flex: 1;
-}
-
-.battery {
-  font-size: 15px;
-  color: #888888;
-}
-
+.status-text { font-size: 15px; color: #cccccc; flex: 1; }
+.battery { font-size: 15px; color: #888888; }
 .pad {
   flex: 1;
   margin-top: 6px;
@@ -224,18 +184,8 @@ export default {
   justify-content: center;
   align-items: center;
 }
-
-.pad-hint {
-  font-size: 17px;
-  color: #666666;
-  text-align: center;
-}
-
-.keys {
-  flex-direction: row;
-  height: 62px;
-}
-
+.pad-hint { font-size: 17px; color: #666666; text-align: center; }
+.keys { flex-direction: row; height: 62px; }
 .key {
   flex: 1;
   margin-left: 3px;
@@ -245,10 +195,5 @@ export default {
   justify-content: center;
   align-items: center;
 }
-
-.key-label {
-  font-size: 18px;
-  color: #ffffff;
-  text-align: center;
-}
+.key-label { font-size: 18px; color: #ffffff; text-align: center; }
 </style>
