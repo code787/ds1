@@ -1,0 +1,111 @@
+<script>
+const interconnect = require("@system.interconnect");
+const vibrator = require("@system.vibrator");
+const { parseFrame } = require("./common/protocol");
+
+const connect = interconnect.instance();
+const SEND_RETRY = 2;
+
+/**
+ * 与手机的链路层（CommonJS）。
+ *
+ * 收到的帧有两种：
+ * - kind=status：手机状态（链路、电量、手势服务是否开启）
+ * - kind=ack   ：手机确认收到某条指令
+ *
+ * 约束：
+ * - 收到 status 立刻回 ack，让手机知道链路活着；
+ * - 发送失败重试次数有上限，避免堆积；
+ * - 震动失败不影响功能。
+ */
+export default {
+  onCreate() {
+    this.page = null;
+    this.link = "connecting";
+    this.battery = -1;
+    this.listening = false;
+
+    this._onMessage = (payload) => this.handleFrame(payload);
+    try {
+      connect.onMessage(this._onMessage);
+    } catch (e) {
+      console.error("onMessage 注册失败", e);
+    }
+  },
+
+  onDestroy() {
+    try {
+      connect.offMessage(this._onMessage);
+    } catch (e) {
+      // 解绑失败不影响退出
+    }
+  },
+
+  attachPage(page) {
+    this.page = page;
+    this.pushStatus();
+  },
+
+  detachPage() {
+    this.page = null;
+  },
+
+  handleFrame(payload) {
+    const frame = parseFrame(payload);
+    if (!frame) return;
+
+    if (frame.kind === "ack") {
+      if (this.page) this.page.onAck(frame.refId);
+      return;
+    }
+
+    this.link = frame.link;
+    this.battery = frame.battery;
+    this.listening = frame.listening;
+    this.pushStatus();
+    this.ack(frame.id);
+  },
+
+  ack(refId) {
+    try {
+      connect.send(JSON.stringify({ t: "ack", refId: refId || "status" }));
+    } catch (e) {
+      // ack 失败无需处理，下一次心跳会重新确认链路
+    }
+  },
+
+  pushStatus() {
+    if (!this.page) return;
+    this.page.onStatus({
+      link: this.link,
+      battery: this.battery,
+      listening: this.listening,
+    });
+  },
+
+  /** 发送一条指令。返回 true 表示已交给链路层（不代表手机执行成功）。 */
+  send(cmd) {
+    const text = JSON.stringify(cmd);
+    for (let i = 0; i <= SEND_RETRY; i++) {
+      try {
+        connect.send(text);
+        return true;
+      } catch (e) {
+        if (i === SEND_RETRY) {
+          console.error("发送失败", e);
+          return false;
+        }
+      }
+    }
+    return false;
+  },
+
+  buzz() {
+    try {
+      vibrator.start({ mode: "short", count: 1 });
+    } catch (e) {
+      // 手环不支持震动时不影响功能
+    }
+  },
+};
+</script>

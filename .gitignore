@@ -1,0 +1,22 @@
+# 签名证书（绝不入库）
+app/signing/
+band-app/sign/
+*.jks
+*.p12
+*.pem
+
+# 构建产物
+app/build/
+band-app/dist/
+band-app/node_modules/
+.gradle/
+local.properties
+*.apk
+*.rpk
+
+# 小米官方 SDK（不随仓库分发）
+app/libs/*.aar
+
+# Python 缓存
+__pycache__/
+*.pyc

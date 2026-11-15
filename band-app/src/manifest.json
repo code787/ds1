@@ -1,0 +1,18 @@
+{
+  "package": "com.wristcontrol.app",
+  "name": "遥控手机",
+  "versionName": "0.1.0",
+  "versionCode": 1,
+  "icon": "/logo.png",
+  "minPlatformVersion": 1000,
+  "deviceTypeList": ["watch"],
+  "features": [
+    { "name": "system.interconnect" },
+    { "name": "system.vibrator" }
+  ],
+  "config": { "designWidth": 192 },
+  "router": {
+    "entry": "pages/index",
+    "pages": { "pages/index": { "component": "index" } }
+  }
+}

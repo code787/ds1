@@ -1,0 +1,74 @@
+name: Build APK + RPK
+
+# 云端出包：手机 APK 与手环 RPK 用同一份证书签名。
+# 小米互联要求同包名 + 同证书，缺一不可。
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 准备 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 准备 Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 下载小米官方 SDK（AAR）
+        run: |
+          mkdir -p app/libs
+          curl -sSL -o demo.zip https://cdn.cnbj3-fusion.fds.api.mi-img.com/quickapp-vela/interconnect_dev_test_demo.zip
+          unzip -j demo.zip 'interconnect_dev_test_demo/libs/xms-wearable-lib_1.4_release.aar' -d app/libs/
+          echo "=== AAR 校验 ==="
+          sha256sum app/libs/xms-wearable-lib_1.4_release.aar
+          # 官方示例包里的哈希，不匹配就失败
+          echo "9c40fd1c5409bb948523d503af71e2978ae522c35636afe7d64f474c0f6bc195  app/libs/xms-wearable-lib_1.4_release.aar" | sha256sum -c -
+
+      - name: 生成签名证书
+        run: python3 scripts/gen-signing.py
+
+      - name: 编译手机端 APK
+        run: |
+          chmod +x gradlew || true
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: 编译手环端 RPK
+        run: |
+          cd band-app && npm install
+          cd .. && node scripts/build-rpk.js
+
+      - name: 跑单测
+        run: cd band-app && npm test
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: wristcontrol-build
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            band-app/dist/*.rpk
+
+      - name: 发布到 Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Build #${{ github.run_number }}
+          body: |
+            自动构建产物。
+            **APK 和 RPK 必须一起下载安装**——证书同源，混用会静默失败。
+          files: |
+            app/build/outputs/apk/debug/*.apk
+            band-app/dist/*.rpk
