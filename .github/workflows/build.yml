@@ -21,6 +21,11 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: 准备 Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
       - name: 准备 Node 20
         uses: actions/setup-node@v4
         with:
@@ -33,24 +38,19 @@ jobs:
           unzip -j demo.zip 'interconnect_dev_test_demo/libs/xms-wearable-lib_1.4_release.aar' -d app/libs/
           echo "=== AAR 校验 ==="
           sha256sum app/libs/xms-wearable-lib_1.4_release.aar
-          # 官方示例包里的哈希，不匹配就失败
           echo "9c40fd1c5409bb948523d503af71e2978ae522c35636afe7d64f474c0f6bc195  app/libs/xms-wearable-lib_1.4_release.aar" | sha256sum -c -
 
       - name: 生成签名证书
         run: python3 scripts/gen-signing.py
 
       - name: 编译手机端 APK
-        run: |
-          chmod +x gradlew || true
-          ./gradlew :app:assembleDebug --no-daemon --stacktrace
-
-      - name: 编译手环端 RPK
-        run: |
-          cd band-app && npm install
-          cd .. && node scripts/build-rpk.js
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
 
       - name: 跑单测
-        run: cd band-app && npm test
+        run: cd band-app && npm install && npm test
+
+      - name: 编译手环端 RPK
+        run: node scripts/build-rpk.js
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
