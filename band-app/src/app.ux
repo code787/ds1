@@ -39,7 +39,6 @@ export default {
   // ---- 体感状态 ----
   tiltOn: false,          // 开关
   recording: false,       // 是否在学习录制
-  recorder: null,         // 当前录制器
   sensorSubscribed: false,
 
   onCreate() {
@@ -138,16 +137,8 @@ export default {
       if (typeof frame.live === "boolean") this.cfg.live = frame.live;
       // 配置变了要重建录制器，否则旧参数还在用
       this._live = null;
-      this.recorder = null;
       if (this.page && typeof this.page.onConfig === "function") {
         this.page.onConfig(this.cfg);
-      }
-      return;
-    }
-    if (frame.kind === "gsync") {
-      this.applyGestureList(frame.list);
-      if (this.page && typeof this.page.onTemplates === "function") {
-        this.page.onTemplates(this._templates);
       }
       return;
     }
@@ -366,19 +357,6 @@ export default {
     }
   },
 
-  /** 识别到一个手势，发给手机（映射在手机端做）。 */
-  _fireGesture(path) {
-    if (!path || path.length === 0) return;
-    const text = path.join(",");
-    this._lastGesture = text;
-    if (this.page && typeof this.page.onGesture === "function") {
-      this.page.onGesture(text);
-    }
-    // 识别成功先震一下——盲操作时这是唯一反馈
-    buzz.ok();
-    this.send({ t: "gesture", path: text });
-  },
-
   /**
    * 开始学习录制。
    *
@@ -396,13 +374,6 @@ export default {
     if (!this.tiltOn) this._unsubscribeSensor();
     return [];
   },
-
-  /** 接收手机下发的手势模板列表。 */
-  applyGestureList(list) {
-    this._templates = Array.isArray(list) ? list : [];
-  },
-
-  templates() { return this._templates || []; },
 
 
 

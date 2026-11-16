@@ -55,7 +55,6 @@ export default {
     errorText: "",
     tiltOn: false,
     tiltHint: "",
-    gestureText: "",
     diagOpen: false,
     diagCmd: "",
     diagCode: "",
@@ -207,29 +206,6 @@ export default {
       const s = "x" + sensor.ax + " y" + sensor.ay + " z" + sensor.az;
       if (this.sensorText !== s) this.sensorText = s;
     }
-  },
-
-  /** 识别到一个手势。 */
-  onGesture(text) {
-    const label = (text || "").split(",").map((d) => this.dirLabel(d)).join("→");
-    const t = "手势 " + label;
-    if (this.gestureText !== t) this.gestureText = t;
-    if (this.tiltHint !== t) this.tiltHint = t;
-  },
-
-  /** 收到模板列表。 */
-  onTemplates(list) {
-    const n = Array.isArray(list) ? list.length : 0;
-    this.tiltHint = "模板 " + n + " 条";
-  },
-
-  /** 学习录制中的实时反馈。 */
-  onRecord(path, hint) {
-    const p = path && path.length
-      ? path.map((d) => this.dirLabel(d)).join("→")
-      : this.dirLabel(hint);
-    const text = "录制中 " + p;
-    if (this.tiltHint !== text) this.tiltHint = text;
   },
 
   /** 长按触摸板：打开完整诊断层。 */
