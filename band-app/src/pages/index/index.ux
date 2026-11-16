@@ -90,9 +90,10 @@ export default {
   /** 由 app.ux 推送链路状态。 */
   onStatus(status) {
     const linkOk = status.link === "connected";
-    if (this.tiltOn !== (status.tiltOn === true)) {
-      this.tiltOn = status.tiltOn === true;
-    }
+    // 体感开关以**手环本地**为准，不跟随手机。
+    // 之前这里跟着 status.tiltOn 改，而手机端初始 false，
+    // 每 5 秒一帧就把用户刚打开的开关压回去。
+    // 开关是用户在手上点的，手环才是真相源。
     const listening = status.listening === true;
 
     if (this.linkOk !== linkOk) this.linkOk = linkOk;
