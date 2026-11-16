@@ -25,9 +25,8 @@ class GesturePanel(private val activity: Activity) {
 
     private val store = GestureStore(activity)
     private val cfgStore = GestureConfigStore(activity)
-    private var rotationValue: TextView? = null
-    private val cfgStore = GestureConfigStore(activity)
     private var cfg = cfgStore.load()
+    private var rotationValue: TextView? = null
 
     private val root = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL
