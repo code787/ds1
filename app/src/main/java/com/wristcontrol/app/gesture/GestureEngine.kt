@@ -6,9 +6,17 @@ package com.wristcontrol.app.gesture
  * 用手环的**绝对倾角**而不是位置——加速度计二次积分求位移会漂移，
  * 但倾角是绝对测量，稳定可靠。体验上等同鼠标手势，输入方式从"拖动"变成"倾斜"。
  */
+/**
+ * 四方向编码。
+ *
+ * 为什么只有四个：实测斜方向（NE/NW/SE/SW）很难打准——
+ * 手腕倾斜是连续的，45 度夹角窗口太窄，稍偏就跳到相邻象限。
+ * 四方向每个占 90 度，容错大得多。
+ *
+ * 四个方向两两组合 = 16 种手势，日常够用。
+ */
 enum class Dir(val code: String) {
-    N("N"), NE("NE"), E("E"), SE("SE"),
-    S("S"), SW("SW"), W("W"), NW("NW");
+    N("N"), E("E"), S("S"), W("W");
 
     companion object {
         fun fromCode(code: String): Dir? = entries.firstOrNull { it.code == code }
@@ -119,15 +127,12 @@ object TiltMapper {
         if (magnitude < DEAD_ZONE) return null
         val angle = Math.toDegrees(kotlin.math.atan2(y.toDouble(), x.toDouble()))
         val normalized = ((angle % 360) + 360) % 360
+        // 每 90 度一个方向，以各轴为中心 ±45 度
         return when {
-            normalized < 22.5 || normalized >= 337.5 -> Dir.E
-            normalized < 67.5 -> Dir.NE
-            normalized < 112.5 -> Dir.N
-            normalized < 157.5 -> Dir.NW
-            normalized < 202.5 -> Dir.W
-            normalized < 247.5 -> Dir.SW
-            normalized < 292.5 -> Dir.S
-            else -> Dir.SE
+            normalized < 45.0 || normalized >= 315.0 -> Dir.E
+            normalized < 135.0 -> Dir.N
+            normalized < 225.0 -> Dir.W
+            else -> Dir.S
         }
     }
 }

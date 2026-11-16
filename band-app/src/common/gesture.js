@@ -22,41 +22,31 @@ var MAX_STEPS = 2;
 var IDLE_END_MS = 600;
 
 /**
- * 把倾角映射到八方向。
+ * 把倾角映射到四方向。
  * x 向右为正，y 向上为正；死区内返回 null。
+ *
+ * 为什么只有四个方向：斜方向（NE/NW/SE/SW）的 45 度窗口太窄，
+ * 手腕倾斜是连续的，稍偏就跳到相邻象限，实测打不准。
+ * 四方向每个占 90 度，容错大得多。四个方向两两组合 = 16 种手势。
  */
 function toDir(x, y, rotation) {
-  var mag = Math.sqrt(x * x + y * y);
-  if (mag < DEAD_ZONE) return null;
-  var angle = Math.atan2(y, x) * 180 / Math.PI;
-  // 坐标系旋转：手环戴在手腕上时 x/y 轴与用户以为的上下左右对不上
-  angle = angle - (rotation || 0);
-  var n = ((angle % 360) + 360) % 360;
-  if (n < 22.5 || n >= 337.5) return "E";
-  if (n < 67.5) return "NE";
-  if (n < 112.5) return "N";
-  if (n < 157.5) return "NW";
-  if (n < 202.5) return "W";
-  if (n < 247.5) return "SW";
-  if (n < 292.5) return "S";
-  return "SE";
+  return toDirWithZone(x, y, DEAD_ZONE, rotation);
 }
 
 /** 内部用：同时指定死区与旋转。 */
 function toDirWithZone(x, y, dz, rotation) {
+  var deadZone = dz === undefined ? DEAD_ZONE : dz;
   var mag = Math.sqrt(x * x + y * y);
-  if (mag < dz) return null;
+  if (mag < deadZone) return null;
   var angle = Math.atan2(y, x) * 180 / Math.PI;
-  angle = angle - (rotation || 0);
+  // 坐标系旋转：手环戴在手腕上时 x/y 轴与用户以为的上下左右对不上。
+  // 用加法：rotation=90 表示"实测的右其实是上"，需要把方向顺时针补 90 度。
+  angle = angle + (rotation || 0);
   var n = ((angle % 360) + 360) % 360;
-  if (n < 22.5 || n >= 337.5) return "E";
-  if (n < 67.5) return "NE";
-  if (n < 112.5) return "N";
-  if (n < 157.5) return "NW";
-  if (n < 202.5) return "W";
-  if (n < 247.5) return "SW";
-  if (n < 292.5) return "S";
-  return "SE";
+  if (n < 45 || n >= 315) return "E";
+  if (n < 135) return "N";
+  if (n < 225) return "W";
+  return "S";
 }
 
 /**
@@ -181,6 +171,7 @@ module.exports = {
   HOLD_MS: HOLD_MS,
   IDLE_END_MS: IDLE_END_MS,
   toDir: toDir,
+  toDirWithZone: toDirWithZone,
   createRecorder: createRecorder,
   distance: distance,
   bestMatch: bestMatch,

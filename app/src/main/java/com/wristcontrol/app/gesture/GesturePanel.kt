@@ -101,7 +101,7 @@ class GesturePanel(private val activity: Activity) {
             setPadding(0, 24, 0, 4)
         })
         root.addView(TextView(activity).apply {
-            text = "向右倾却识别成右上/右下时调这个。\n每 45 度对应一个方向，整圈 360。"
+            text = "向右倾却识别成上/下时调这个。\n每 90 度对应一个方向，整圈 360。"
             textSize = 13f
         })
         rotationValue = TextView(activity).apply {
@@ -168,13 +168,9 @@ class GesturePanel(private val activity: Activity) {
 
     private fun dirLabel(code: String): String = when (code) {
         "N" -> "⬆ 上"
-        "NE" -> "↗ 右上"
         "E" -> "➡ 右"
-        "SE" -> "↘ 右下"
         "S" -> "⬇ 下"
-        "SW" -> "↙ 左下"
         "W" -> "⬅ 左"
-        "NW" -> "↖ 左上"
         else -> "— 未倾斜"
     }
 
@@ -257,7 +253,7 @@ class GesturePanel(private val activity: Activity) {
 
     private fun startLearn() {
         val dirs = arrayOf("N 上", "NE 右上", "E 右", "SE 右下", "S 下", "SW 左下", "W 左", "NW 左上")
-        val codes = arrayOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+        val codes = arrayOf("N", "E", "S", "W")
         val first = arrayOfNulls<String>(1)
 
         AlertDialog.Builder(activity)
@@ -272,7 +268,7 @@ class GesturePanel(private val activity: Activity) {
 
     private fun chooseSecond(firstDir: String) {
         val dirs = arrayOf("（只要一个方向）", "N 上", "NE 右上", "E 右", "SE 右下", "S 下", "SW 左下", "W 左", "NW 左上")
-        val codes = arrayOf("", "N", "NE", "E", "SE", "S", "SW", "W", "NW")
+        val codes = arrayOf("", "N", "E", "S", "W")
         AlertDialog.Builder(activity)
             .setTitle("第二步：第二个方向（可跳过）")
             .setItems(dirs) { _, which ->

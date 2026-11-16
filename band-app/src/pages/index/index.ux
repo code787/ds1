@@ -177,18 +177,29 @@ export default {
     app.setTilt(!this.tiltOn);
   },
 
+  /** 方向代码转中文。四方向：上/右/下/左。 */
+  dirLabel(code) {
+    if (code === "N") return "上";
+    if (code === "E") return "右";
+    if (code === "S") return "下";
+    if (code === "W") return "左";
+    return code || "";
+  },
+
   /** app.ux 推送倾角方向（实时反馈）。 */
   onTilt(hint, path) {
     const on = this.tiltOn;
     if (!on) return;
-    const p = path && path.length ? path.join("→") : "";
-    const text = hint ? "当前 " + hint + (p ? " | " + p : "") : (p ? p : "倾斜试试");
+    const cur = hint ? this.dirLabel(hint) : "";
+    const p = path && path.length ? path.map((d) => this.dirLabel(d)).join("→") : "";
+    const text = cur ? "当前 " + cur + (p ? " | " + p : "") : (p ? p : "倾斜试试");
     if (this.tiltHint !== text) this.tiltHint = text;
   },
 
   /** 识别到一个手势。 */
   onGesture(text) {
-    const t = "手势 " + text;
+    const label = (text || "").split(",").map((d) => this.dirLabel(d)).join("→");
+    const t = "手势 " + label;
     if (this.gestureText !== t) this.gestureText = t;
     if (this.tiltHint !== t) this.tiltHint = t;
   },
@@ -201,7 +212,9 @@ export default {
 
   /** 学习录制中的实时反馈。 */
   onRecord(path, hint) {
-    const p = path && path.length ? path.join("→") : (hint || "");
+    const p = path && path.length
+      ? path.map((d) => this.dirLabel(d)).join("→")
+      : this.dirLabel(hint);
     const text = "录制中 " + p;
     if (this.tiltHint !== text) this.tiltHint = text;
   },
