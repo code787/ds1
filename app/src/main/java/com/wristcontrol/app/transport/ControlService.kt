@@ -232,6 +232,7 @@ class ControlService : Service() {
                 is Command.TiltLive -> false
                 is Command.TiltState -> false
                 is Command.RawAccel -> false
+                is Command.SensorState -> false
             }
         } finally {
             try {

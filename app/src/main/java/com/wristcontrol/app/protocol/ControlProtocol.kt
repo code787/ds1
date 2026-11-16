@@ -27,6 +27,9 @@ sealed interface Command {
     /** 心跳，只刷新存活时间，不执行任何动作。 */
     data object Ping : Command
 
+    /** 手环上报传感器订阅状态。 */
+    data class SensorState(val ok: Boolean, val msg: String) : Command
+
     /** 手环回执：表示某条状态帧已收到（手机端据此停止重发）。 */
     data class Ack(val refId: String) : Command
 
@@ -92,6 +95,10 @@ sealed interface Command {
                 "gesture" -> GestureHit(o.optString("path"))
                 "syncreq" -> SyncRequest
                 "tilt" -> TiltState(o.optBoolean("on", false))
+                "sensor" -> SensorState(
+                    ok = o.optBoolean("ok", false),
+                    msg = o.optString("msg"),
+                )
                 "raw" -> RawAccel(
                     x = o.optDouble("x", 0.0).toFloat(),
                     y = o.optDouble("y", 0.0).toFloat(),
