@@ -188,13 +188,18 @@ export default {
   },
 
   /** app.ux 推送倾角方向（实时反馈）。 */
-  onTilt(hint, path) {
-    const on = this.tiltOn;
-    if (!on) return;
+  onTilt(hint, path, sensor) {
+    if (!this.tiltOn) return;
     const cur = hint ? this.dirLabel(hint) : "";
     const p = path && path.length ? path.map((d) => this.dirLabel(d)).join("→") : "";
-    const text = cur ? "当前 " + cur + (p ? " | " + p : "") : (p ? p : "倾斜试试");
+    const text = cur ? "当前 " + cur + (p ? " | " + p : "") : (p ? p : "静止");
     if (this.tiltHint !== text) this.tiltHint = text;
+
+    // 传感器数值：不管有没有倾斜都显示
+    if (sensor) {
+      const s = "x" + sensor.ax + " y" + sensor.ay + " z" + sensor.az;
+      if (this.sensorText !== s) this.sensorText = s;
+    }
   },
 
   /** 识别到一个手势。 */

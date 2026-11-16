@@ -155,10 +155,6 @@ class ControlService : Service() {
             return
         }
         if (command is Command.TiltLive) {
-            lastTilt = command
-            return
-        }
-        if (command is Command.TiltLive) {
             lastLiveDir = command.dir
             lastLivePath = command.path
             lastTilt = command

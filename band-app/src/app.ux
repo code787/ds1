@@ -368,17 +368,20 @@ export default {
       });
     }
 
-    // 诊断模式：把当前方向 + 原始加速度发给手机
-    // 手环只有加速度计、没有陀螺仪，所以能给的只有 ax/ay/az。
-    if (this.cfgLive && hint) {
+    // 诊断模式：把原始加速度发给手机。
+    //
+    // **不能加 hint 条件**：hint 只在倾斜超过死区时才有值，
+    // 平放不动时是 null，那样一条都不发，界面上永远空白。
+    // 现在只要体感开关开着就上报，静止时也能看到数值。
+    if (this.cfgLive) {
       const now = Date.now();
-      // 限流：每 120ms 最多一条，避免把蓝牙打满
-      if (now - (this._lastLiveAt || 0) >= 120) {
+      // 限流：每 200ms 最多一条，避免把蓝牙打满
+      if (now - (this._lastLiveAt || 0) >= 200) {
         this._lastLiveAt = now;
         const angle = Math.atan2(y, x) * 180 / Math.PI;
         this.send({
           t: "tiltlive",
-          dir: hint,
+          dir: hint || "",
           path: path.join(","),
           ax: Math.round(x * 100) / 100,
           ay: Math.round(y * 100) / 100,
