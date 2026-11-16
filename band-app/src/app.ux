@@ -86,7 +86,10 @@ export default {
   send(cmd, onResult) {
     this._lastError = "";
     try {
-      this._rebuild();
+      // 闭源 ControlPhone 的做法：构造时建一次实例，之后一直复用，
+      // **不重建、不查 getApkStatus、不等待**，直接 send。
+      // 每次重建会让连接重新绑定，绑定期间状态必然未就绪。
+      if (!this._connect) this._rebuild();
       const conn = this._connect;
       if (!conn) {
         this._lastError = "连接实例不可用";
@@ -149,36 +152,25 @@ export default {
    * 这个状态决定能不能发——不看它直接 send 就会 not connected。
    * apkStatus 是同步返回值，这里轮询等它变成可用状态。
    */
+  /**
+   * 查一次链路状态，**不重建连接**。
+   *
+   * 闭源 ControlPhone 压根不查这个就直接 send，说明它不该作为发送前置条件。
+   * 这里只用来在诊断层显示，不阻塞发送。
+   */
   waitReady(onResult) {
-    const MAX_WAIT = 3000;
-    const STEP = 200;
-    let waited = 0;
-    const self = this;
-    function tick() {
-      self._rebuild();
-      let status = -1;
-      try {
-        status = self._connect && typeof self._connect.getApkStatus === "function"
-          ? self._connect.getApkStatus()
-          : -1;
-      } catch (e) {
-        status = -1;
-      }
-      self._apkStatus = status;
-
-      // 官方示例里 getApkStatus 可用时返回非负值；-1 表示还没连上
-      if (status !== undefined && status !== null && status >= 0) {
-        if (onResult) onResult(true, status);
-        return;
-      }
-      if (waited >= MAX_WAIT) {
-        if (onResult) onResult(false, status);
-        return;
-      }
-      waited += STEP;
-      setTimeout(tick, STEP);
+    let status = -1;
+    try {
+      if (!this._connect) this._rebuild();
+      status = this._connect && typeof this._connect.getApkStatus === "function"
+        ? this._connect.getApkStatus()
+        : -1;
+    } catch (e) {
+      status = -1;
     }
-    tick();
+    this._apkStatus = status;
+    // 永远回调 true：不让状态查询挡住发送
+    if (onResult) onResult(true, status);
   },
 
   /** 官方提供的另一个状态接口：同步返回 apkStatus。 */

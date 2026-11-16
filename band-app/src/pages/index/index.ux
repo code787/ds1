@@ -200,29 +200,14 @@ export default {
     // 先显示"发送中"，回调到了再更新——手环端没有 adb，页面是唯一反馈
     if (this.padHint !== "发送中 " + name) this.padHint = "发送中 " + name;
 
-    const doSend = () => {
-      app.send(cmd, (ok, err) => {
-        const text = ok ? "已发送 " + name : "发送失败 " + name;
-        if (this.padHint !== text) this.padHint = text;
-        const short = (err || "").slice(0, 18);
-        if (this.errorText !== short) this.errorText = short;
-      });
-    };
-
-    // 官方流程：先确认 apkStatus 可用再发，否则必然 not connected
-    if (typeof app.waitReady === "function") {
-      app.waitReady((ready, status) => {
-        if (!ready) {
-          const text = "链路未就绪(" + status + ")";
-          if (this.padHint !== text) this.padHint = text;
-          this.errorText = "apkStatus=" + status;
-          return;
-        }
-        doSend();
-      });
-    } else {
-      doSend();
-    }
+    // 闭源 ControlPhone 直接 send，不等状态、不重建连接。
+    // 状态查询只用于诊断显示，不作为发送前置条件。
+    app.send(cmd, (ok, err) => {
+      const text = ok ? "已发送 " + name : "发送失败 " + name;
+      if (this.padHint !== text) this.padHint = text;
+      const short = (err || "").slice(0, 18);
+      if (this.errorText !== short) this.errorText = short;
+    });
   },
 
   /** 查一下连接状态，显示在页面上。 */
