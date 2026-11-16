@@ -373,22 +373,24 @@ export default {
     // **不能加 hint 条件**：hint 只在倾斜超过死区时才有值，
     // 平放不动时是 null，那样一条都不发，界面上永远空白。
     // 现在只要体感开关开着就上报，静止时也能看到数值。
+    // 原始数据上报：**完全不过滤**。
+    //
+    // 之前有限流（200ms 一条）、有取整（两位小数）、还判断 hint。
+    // 这些都会让调试时看不到真实波形——手抖一下、快速摆动全被吃掉了。
+    // 现在每次采样都发原值，手机上能看到完整数据。
+    //
+    // 代价是蓝牙流量大（20ms 一条 ≈ 50 条/秒），只在诊断开关打开时发。
     if (this.cfgLive) {
-      const now = Date.now();
-      // 限流：每 200ms 最多一条，避免把蓝牙打满
-      if (now - (this._lastLiveAt || 0) >= 200) {
-        this._lastLiveAt = now;
-        const angle = Math.atan2(y, x) * 180 / Math.PI;
-        this.send({
-          t: "tiltlive",
-          dir: hint || "",
-          path: path.join(","),
-          ax: Math.round(x * 100) / 100,
-          ay: Math.round(y * 100) / 100,
-          az: Math.round((ret.z || 0) * 100) / 100,
-          angle: Math.round(angle * 10) / 10,
-        });
-      }
+      const angle = Math.atan2(y, x) * 180 / Math.PI;
+      this.send({
+        t: "tiltlive",
+        dir: hint || "",
+        path: path.join(","),
+        ax: x,
+        ay: y,
+        az: ret.z === undefined ? 0 : ret.z,
+        angle: angle,
+      });
     }
 
     // 静止足够久 -> 手势结束，尝试匹配

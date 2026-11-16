@@ -190,10 +190,10 @@ class GesturePanel(private val activity: Activity) {
             "等待手环上报…\n（需打开手环上的体感开关）"
         } else {
             val fmt = java.util.Locale.US
-            "ax  %8.2f\n".format(fmt, t.ax) +
-                "ay  %8.2f\n".format(fmt, t.ay) +
-                "az  %8.2f\n".format(fmt, t.az) +
-                "角度 %7.1f°\n".format(fmt, t.angle) +
+            "ax  %10.4f\n".format(fmt, t.ax) +
+                "ay  %10.4f\n".format(fmt, t.ay) +
+                "az  %10.4f\n".format(fmt, t.az) +
+                "角度 %8.2f°\n".format(fmt, t.angle) +
                 "方向 %s".format(t.dir)
         }
         if (sensorBox.text != text) sensorBox.text = text
