@@ -208,8 +208,12 @@ class ControlService : Service() {
             pushStatus()
             return
         }
+        val a11yReady = ControlAccessibilityService.Access.isReady()
         DiagnoseLog.append(this, "执行指令: ${command.javaClass.simpleName}")
-        DiagnoseLog.append(this, "  无障碍服务就绪=${ControlAccessibilityService.Access.isReady()}")
+        DiagnoseLog.append(this, "  无障碍服务就绪=$a11yReady")
+        if (!a11yReady) {
+            DiagnoseLog.append(this, "  ⚠ 无障碍服务未启用，指令会被丢弃！请到系统设置里开启")
+        }
 
         val lock = try {
             power?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WristControl:cmd")
@@ -249,6 +253,7 @@ class ControlService : Service() {
             }
         }
 
+        DiagnoseLog.append(this, "  执行结果=$executed")
         DiagnoseLog.append(this, "  执行结果=$executed")
         // 只有真的执行成功才回执，失败不回执，手环会停在"已发送…"
         if (executed) ack()
