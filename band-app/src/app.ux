@@ -1,6 +1,5 @@
 <script>
 const interconnect = require("@system.interconnect");
-const gestureLib = require("./common/gesture");
 const buzz = require("./common/buzz");
 
 /**
@@ -313,7 +312,9 @@ export default {
       const sensor = require("@system.sensor");
       this._sensor = sensor;
       sensor.subscribeAccelerometer({
-        interval: gestureLib.INTERVAL,
+        // 直接写死，不从 gesture.js 取——webpack 打包后 gestureLib.INTERVAL 是 undefined，
+        // interval 传 undefined 会导致订阅失败。
+        interval: "game",
         callback: (ret) => this._onAccel(ret),
         fail: (msg, code) => {
           // 失败只记录原因，不改变开关状态（开关是用户意图）
