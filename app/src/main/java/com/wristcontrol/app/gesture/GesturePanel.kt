@@ -95,8 +95,8 @@ class GesturePanel(private val activity: Activity) {
             setPadding(0, 16, 0, 8)
         })
 
-        addSlider("死区角度", "倾斜小于这个角度视为没动。越小越灵敏", 4, 40, cfg.deadZone) { v ->
-            cfg = cfg.copy(deadZone = v)
+        addSlider("左右死区", "左右倾斜多少度才算动作。手环横戴时左右幅度小，可以调低", 4, 60, cfg.deadZoneH) { v ->
+            cfg = cfg.copy(deadZoneH = v)
             applyCfg()
         }
         addSlider("方向保持", "同一方向需持续多久才确认。越小越跟手", 40, 500, cfg.holdMs) { v ->
@@ -139,6 +139,10 @@ class GesturePanel(private val activity: Activity) {
                     rotationValue?.text = "当前：" + value + "°"
                     saveCfg(cfgStore.load().copy(rotationOffset = value))
                 }
+        addSlider("上下死区", "上下倾斜多少度才算动作。上下幅度通常更大，可以调高", 4, 60, cfg.deadZoneV) { v ->
+            saveCfg(cfgStore.load().copy(deadZoneV = v))
+            cfg = cfgStore.load()
+        }
                 override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
                 override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {}
             })

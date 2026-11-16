@@ -149,7 +149,8 @@ object StatusCodec {
 
     /** 手机 → 手环：下发手势识别配置（死区、时长等）。 */
     fun encodeConfigSync(
-        deadZone: Int,
+        deadZoneH: Int,
+        deadZoneV: Int,
         holdMs: Int,
         idleEndMs: Int,
         live: Boolean,
@@ -159,7 +160,8 @@ object StatusCodec {
         JSONObject().apply {
             put("v", 1)
             put("kind", "cfg")
-            put("deadZone", deadZone)
+            put("deadZoneH", deadZoneH)
+            put("deadZoneV", deadZoneV)
             put("holdMs", holdMs)
             put("idleEndMs", idleEndMs)
             put("live", live)

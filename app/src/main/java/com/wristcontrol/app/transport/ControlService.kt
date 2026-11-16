@@ -317,10 +317,11 @@ class ControlService : Service() {
     fun pushConfig() {
         val c = configStore.load()
         engine.updateConfig(c)
-        DiagnoseLog.append(this, "下发配置: 死区=${c.deadZone}° 保持=${c.holdMs}ms 静止=${c.idleEndMs}ms")
+        DiagnoseLog.append(this, "下发配置: 左右死区=${c.deadZoneH}° 上下死区=${c.deadZoneV}° 保持=${c.holdMs}ms")
         transport?.sendRaw(
             com.wristcontrol.app.protocol.StatusCodec.encodeConfigSync(
-                deadZone = c.deadZone,
+                deadZoneH = c.deadZoneH,
+                deadZoneV = c.deadZoneV,
                 holdMs = c.holdMs,
                 idleEndMs = c.idleEndMs,
                 live = c.showLive,

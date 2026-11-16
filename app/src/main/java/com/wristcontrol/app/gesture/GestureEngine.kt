@@ -174,12 +174,16 @@ class GestureEngine(private var config: GestureConfig = GestureConfig()) {
         val now = System.currentTimeMillis()
 
         // 2. 死区判定（单位：度）
-        val dir = if (tiltDeg < config.deadZone) null else when {
+        // 左右和上下用不同阈值：手环横戴时两个方向的物理幅度不一样。
+        // 先按角度判断大概是哪个方向，再用对应方向的死区。
+        val rawDir = when {
             angle < 45 || angle >= 315 -> "E"
             angle < 135 -> "N"
             angle < 225 -> "W"
             else -> "S"
         }
+        val zone = if (rawDir == "E" || rawDir == "W") config.deadZoneH else config.deadZoneV
+        val dir = if (tiltDeg < zone) null else rawDir
 
         if (dir == null) {
             // 回到死区：重置方向追踪，但**不能提前 return**——

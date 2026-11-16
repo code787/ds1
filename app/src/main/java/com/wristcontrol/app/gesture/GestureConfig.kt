@@ -12,8 +12,19 @@ import android.content.Context
  * 参数存在手机端，同步给手环。改完不用重装 RPK。
  */
 data class GestureConfig(
-    /** 死区角度（度）。倾斜小于这个值视为没动。越小越灵敏。 */
-    val deadZone: Int = 12,
+    /**
+     * 左右方向（E/W）的死区角度（度）。
+     *
+     * 为什么分开：手环横戴时，左右倾斜和上下倾斜的物理幅度不一样——
+     * 手腕左右转动的角度范围比上下抬压小得多，用同一个死区会导致
+     * 一边太灵敏、一边没反应。
+     */
+    val deadZoneH: Int = 18,
+
+    /**
+     * 上下方向（N/S）的死区角度（度）。
+     */
+    val deadZoneV: Int = 18,
 
     /** 同一方向需持续多久才确认（毫秒）。越小越跟手，但抖动变多。 */
     val holdMs: Int = 120,
@@ -39,7 +50,8 @@ data class GestureConfig(
     val rotationOffset: Int = 90,
 ) {
     fun clamp(): GestureConfig = copy(
-        deadZone = deadZone.coerceIn(4, 40),
+        deadZoneH = deadZoneH.coerceIn(4, 60),
+        deadZoneV = deadZoneV.coerceIn(4, 60),
         holdMs = holdMs.coerceIn(40, 500),
         idleEndMs = idleEndMs.coerceIn(200, 2000),
         tolerance = tolerance.coerceIn(0, 2),
@@ -54,7 +66,8 @@ class GestureConfigStore(context: Context) {
         .getSharedPreferences("wristcontrol_gesture_cfg", Context.MODE_PRIVATE)
 
     fun load(): GestureConfig = GestureConfig(
-        deadZone = prefs.getInt("deadZone", 12),
+        deadZoneH = prefs.getInt("deadZoneH", 18),
+        deadZoneV = prefs.getInt("deadZoneV", 18),
         holdMs = prefs.getInt("holdMs", 120),
         idleEndMs = prefs.getInt("idleEndMs", 600),
         tolerance = prefs.getInt("tolerance", 1),
@@ -65,7 +78,8 @@ class GestureConfigStore(context: Context) {
     fun save(cfg: GestureConfig) {
         val c = cfg.clamp()
         prefs.edit()
-            .putInt("deadZone", c.deadZone)
+            .putInt("deadZoneH", c.deadZoneH)
+            .putInt("deadZoneV", c.deadZoneV)
             .putInt("holdMs", c.holdMs)
             .putInt("idleEndMs", c.idleEndMs)
             .putInt("tolerance", c.tolerance)

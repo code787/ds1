@@ -279,21 +279,44 @@ export default {
 
   // ================= 体感控制 =================
 
-  /** 开/关体感模式。开启时订阅加速度计。 */
+  /**
+   * 开/关体感模式。
+   *
+   * 不能有 if (this.tiltOn === on) return 的提前返回——
+   * 状态卡住时（比如订阅失败但 tiltOn 已经是 true）再点就永远没反应。
+   * 每次调用都强制执行，幂等。
+   */
   setTilt(on) {
-    if (this.tiltOn === on) return;
     this.tiltOn = on;
     if (on) {
       this._subscribeSensor();
     } else {
-      this._unsubscribeSensor();
+      // 关闭时无条件取消订阅，不看 sensorSubscribed 标志——
+      // 那个标志可能因为订阅失败而失真，导致退订被跳过。
+      this._forceUnsubscribe();
     }
     this.send({ t: "tilt", on: on });
     this._push();
   },
 
+  /** 强制取消订阅，不依赖 sensorSubscribed 标志。 */
+  _forceUnsubscribe() {
+    try {
+      if (this._sensor && this._sensor.unsubscribeAccelerometer) {
+        this._sensor.unsubscribeAccelerometer();
+      }
+    } catch (e) {
+      // 取消订阅失败不影响关闭
+    }
+    this.sensorSubscribed = false;
+  },
+
   _subscribeSensor() {
-    if (this.sensorSubscribed) return;
+    // 已经是 true 时也要重新订阅一次——状态可能失真（比如订阅失败但标志还是 true）。
+    // 先强制退订，再订阅，保证干净。
+    if (this.sensorSubscribed) {
+      this._forceUnsubscribe();
+    }
     try {
       const sensor = require("@system.sensor");
       this._sensor = sensor;

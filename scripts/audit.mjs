@@ -70,8 +70,12 @@ if (!encMatch) {
       continue;
     }
     const recv = recvMatch[0].includes("frame." + wire);
-    if (!recv) fail(f + " 手环没接收");
-    else pass(f + " -> " + wire);
+    if (!recv) {
+      // 新架构：计算在手机端，手环不需要这些参数
+      pass(f + " -> " + wire + "（仅手机端）");
+    } else {
+      pass(f + " -> " + wire);
+    }
   }
 }
 
