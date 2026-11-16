@@ -40,6 +40,7 @@ export default {
   tiltOn: false,          // 开关
   recording: false,       // 是否在学习录制
   sensorSubscribed: false,
+  _subscribing: false,
 
   onCreate() {
     this._lastError = "";
@@ -282,7 +283,9 @@ export default {
 
   /** 开/关体感模式。开启时订阅加速度计。 */
   setTilt(on) {
-    if (this.tiltOn === on) return;
+    // 不提前返回：即使状态相同也要重试订阅。
+    // 之前 if (this.tiltOn === on) return; 导致
+    // 订阅失败后状态卡在 true，再点也没反应。
     this.tiltOn = on;
     if (on) {
       this._subscribeSensor();
@@ -293,28 +296,47 @@ export default {
     this._push();
   },
 
+  /**
+   * 订阅加速度计。
+   *
+   * 关键时序问题（踩过）：
+   * subscribeAccelerometer 的回调是异步的。如果先无条件写
+   *   this.sensorSubscribed = true;
+   * 而 fail 回调又把 false 写回去，两者顺序不定，最终可能卡在 true——
+   * 于是之后每次点开关都被 if (this.sensorSubscribed) return 挡住，永远重试不了。
+   *
+   * 现在：先用 _subscribing 标记防重入，只认回调里的结果。
+   */
   _subscribeSensor() {
-    if (this.sensorSubscribed) return;
+    if (this.sensorSubscribed || this._subscribing) return;
+    this._subscribing = true;
     try {
       const sensor = require("@system.sensor");
       this._sensor = sensor;
       sensor.subscribeAccelerometer({
         interval: gestureLib.INTERVAL,
-        callback: (ret) => this._onAccel(ret),
+        callback: (ret) => {
+          // 收到第一帧数据才算真正订阅成功
+          if (!this.sensorSubscribed) {
+            this.sensorSubscribed = true;
+            this._subscribing = false;
+            this._lastError = "";
+            this._push();
+          }
+          this._onAccel(ret);
+        },
         fail: (msg, code) => {
-          // 订阅失败**不改变开关状态**——开关是用户的意图，不是订阅结果。
-          // 之前这里把 tiltOn 置 false，看起来像"开关自己关了"，
-          // 实际是加速度计订阅失败。把失败原因显示出来，别偷偷关开关。
-          this._lastError = "传感器订阅失败 code=" + code + " msg=" + (msg || "");
+          this._subscribing = false;
           this.sensorSubscribed = false;
+          this._lastError = "传感器订阅失败 code=" + code + " msg=" + (msg || "");
           this._push();
         },
       });
-      this.sensorSubscribed = true;
+      // 注意：这里**不**置 sensorSubscribed，等回调确认
     } catch (e) {
-      // 同上：订阅抛异常也不动开关，只记录原因
-      this._lastError = "无法订阅传感器: " + errText(e);
+      this._subscribing = false;
       this.sensorSubscribed = false;
+      this._lastError = "无法订阅传感器: " + errText(e);
       this._push();
     }
   },

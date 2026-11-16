@@ -90,10 +90,16 @@ export default {
   /** 由 app.ux 推送链路状态。 */
   onStatus(status) {
     const linkOk = status.link === "connected";
-    // 体感开关以**手环本地**为准，不跟随手机。
-    // 之前这里跟着 status.tiltOn 改，而手机端初始 false，
-    // 每 5 秒一帧就把用户刚打开的开关压回去。
-    // 开关是用户在手上点的，手环才是真相源。
+
+    // 页面的 tiltOn 只是显示，**以 app.ux 的 tiltOn 为真相源**。
+    // 之前这里直接删掉了同步，导致点了开关页面不更新——
+    // 用户看到「体感关」，但 app 里其实已经是 true。
+    // 注意：这里同步的是**手环本地状态**（app.ux 的 tiltOn），
+    // 不是手机端下发的状态，所以不会被手机压回去。
+    if (typeof status.tiltOn === "boolean" && this.tiltOn !== status.tiltOn) {
+      this.tiltOn = status.tiltOn;
+    }
+
     const listening = status.listening === true;
 
     if (this.linkOk !== linkOk) this.linkOk = linkOk;
