@@ -193,6 +193,10 @@ class ControlService : Service() {
                 Command.ScreenOff -> screenOff()
                 Command.Ping -> false
                 is Command.Ack -> false
+                is Command.GestureHit -> false
+                Command.SyncRequest -> false
+                is Command.TiltLive -> false
+                is Command.TiltState -> false
             }
         } finally {
             try {
@@ -230,7 +234,7 @@ class ControlService : Service() {
     fun pushConfig() {
         val c = configStore.load()
         DiagnoseLog.append(this, "下发配置: 死区=${c.deadZone}° 保持=${c.holdMs}ms 静止=${c.idleEndMs}ms")
-        transport.sendRaw(
+        transport?.sendRaw(
             com.wristcontrol.app.protocol.StatusCodec.encodeConfigSync(
                 deadZone = c.deadZone,
                 holdMs = c.holdMs,
@@ -288,7 +292,7 @@ class ControlService : Service() {
     private fun syncGestures() {
         val list = gestureStore.load()
         DiagnoseLog.append(this, "同步手势模板: ${list.size} 条")
-        transport.sendRaw(
+        transport?.sendRaw(
             com.wristcontrol.app.protocol.StatusCodec.encodeGestureSync(list),
         )
         pushConfig()
