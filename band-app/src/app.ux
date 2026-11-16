@@ -1,6 +1,7 @@
 <script>
 const interconnect = require("@system.interconnect");
 const gestureLib = require("./common/gesture");
+const buzz = require("./common/buzz");
 
 /**
  * 手环端链路层。严格按小米官方示例 interconnect-demo 的形态写。
@@ -54,16 +55,49 @@ export default {
           // 单帧失败不影响后续
         }
       };
-      conn.onopen = () => { this.onLink = "connected"; this._push(); };
-      conn.onclose = () => { this.onLink = "disconnected"; this._push(); };
-      conn.onerror = () => { this.onLink = "error"; this._push(); };
+      conn.onopen = () => {
+        this.onLink = "connected";
+        this._reconnectDelay = 0;
+        this._push();
+      };
+      conn.onclose = () => {
+        this.onLink = "disconnected";
+        this._push();
+        this._scheduleReconnect();
+      };
+      conn.onerror = () => {
+        this.onLink = "error";
+        this._push();
+        this._scheduleReconnect();
+      };
     } catch (e) {
       this.onLink = "unavailable";
       this._lastError = "instance 失败: " + errText(e);
     }
   },
 
+  /**
+   * 断线后自动重连。
+   *
+   * 蓝牙抖一下、手机锁屏、走远再回来，都会断开。
+   * 不做重连的话用户得手动重开 App——这是最影响体验的细节之一。
+   * 间隔从 1 秒起翻倍，最多 8 秒，避免频繁重建连接耗电。
+   */
+  _scheduleReconnect() {
+    if (this._reconnectTimer) return;
+    const delay = this._reconnectDelay > 0 ? this._reconnectDelay : 1000;
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null;
+      this._rebuild();
+      this._reconnectDelay = Math.min(delay * 2, 8000);
+    }, delay);
+  },
+
   onDestroy() {
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
     this._unsubscribeSensor();
     const conn = this._connect;
     if (!conn) return;
@@ -347,6 +381,8 @@ export default {
     if (this.page && typeof this.page.onGesture === "function") {
       this.page.onGesture(text);
     }
+    // 识别成功先震一下——盲操作时这是唯一反馈
+    buzz.ok();
     this.send({ t: "gesture", path: text });
   },
 
@@ -377,6 +413,8 @@ export default {
   },
 
   templates() { return this._templates || []; },
+
+
 
   /** 完整失败详情，供诊断层显示。 */
   lastDetail() {
