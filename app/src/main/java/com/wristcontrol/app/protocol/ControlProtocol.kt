@@ -49,7 +49,16 @@ sealed interface Command {
      *
      * 只在学习/调试时开启，正常使用不上报——每 20ms 一条会把蓝牙打满。
      */
-    data class TiltLive(val dir: String, val path: String) : Command
+    data class TiltLive(
+        val dir: String,
+        val path: String,
+        /** 原始加速度三轴。手环没有陀螺仪，所以只有加速度计数据。 */
+        val ax: Float = 0f,
+        val ay: Float = 0f,
+        val az: Float = 0f,
+        /** 换算后的倾斜角（度）。 */
+        val angle: Float = 0f,
+    ) : Command
 
     companion object {
         fun decode(raw: String): Command? = try {

@@ -20,6 +20,7 @@
 
     <div class="pad" onswipe="onSwipe" onclick="onTap" onlongpress="openDiag">
       <text class="pad-hint">{{ padHint }}</text>
+      <text class="pad-sensor" if="{{ sensorText }}">{{ sensorText }}</text>
       <text class="pad-error" if="{{ errorText }}">{{ errorText }}</text>
     </div>
 

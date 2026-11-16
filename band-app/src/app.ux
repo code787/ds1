@@ -361,13 +361,31 @@ export default {
     const path = this._live.path();
 
     if (this.page && typeof this.page.onTilt === "function") {
-      this.page.onTilt(hint, path);
+      this.page.onTilt(hint, path, {
+        ax: Math.round(x * 10) / 10,
+        ay: Math.round(y * 10) / 10,
+        az: Math.round((ret.z || 0) * 10) / 10,
+      });
     }
 
-    // 诊断模式：把当前方向实时发给手机，让 App 上能看到
-    if (this.cfgLive && hint && hint !== this._lastLiveSent) {
-      this._lastLiveSent = hint;
-      this.send({ t: "tiltlive", dir: hint, path: path.join(",") });
+    // 诊断模式：把当前方向 + 原始加速度发给手机
+    // 手环只有加速度计、没有陀螺仪，所以能给的只有 ax/ay/az。
+    if (this.cfgLive && hint) {
+      const now = Date.now();
+      // 限流：每 120ms 最多一条，避免把蓝牙打满
+      if (now - (this._lastLiveAt || 0) >= 120) {
+        this._lastLiveAt = now;
+        const angle = Math.atan2(y, x) * 180 / Math.PI;
+        this.send({
+          t: "tiltlive",
+          dir: hint,
+          path: path.join(","),
+          ax: Math.round(x * 100) / 100,
+          ay: Math.round(y * 100) / 100,
+          az: Math.round((ret.z || 0) * 100) / 100,
+          angle: Math.round(angle * 10) / 10,
+        });
+      }
     }
 
     // 静止足够久 -> 手势结束，尝试匹配

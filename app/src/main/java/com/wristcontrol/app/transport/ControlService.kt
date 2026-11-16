@@ -155,8 +155,14 @@ class ControlService : Service() {
             return
         }
         if (command is Command.TiltLive) {
+            lastTilt = command
+            return
+        }
+        if (command is Command.TiltLive) {
             lastLiveDir = command.dir
             lastLivePath = command.path
+            lastTilt = command
+            // 加速度数值变化很快，日志里只记方向，避免刷屏
             DiagnoseLog.append(this, "实时方向: dir=${command.dir} path=${command.path}")
             liveListener?.invoke(command.dir, command.path)
             return
@@ -210,6 +216,16 @@ class ControlService : Service() {
         // 只有真的执行成功才回执，失败不回执，手环会停在"已发送…"
         if (executed) ack()
     }
+
+    /**
+     * 最近一次实时倾斜数据，供界面读取。
+     *
+     * 手环**只有加速度计，没有陀螺仪**，所以这里只有 ax/ay/az 三轴加速度。
+     * 界面上要如实标注，不能让用户以为有陀螺仪数据。
+     */
+    @Volatile
+    var lastTilt: com.wristcontrol.app.protocol.Command.TiltLive? = null
+        private set
 
     /** 体感模式是否开启（由手环同步过来）。 */
     @Volatile

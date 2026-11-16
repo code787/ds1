@@ -164,6 +164,20 @@ class GesturePanel(private val activity: Activity) {
         if (liveBox.text != label) liveBox.text = label
         val sub = if (path.isNotEmpty()) "本次序列: $path" else "还没识别到方向"
         if (liveSub.text != sub) liveSub.text = sub
+
+        // 传感器原始数据
+        val t = svc.lastTilt
+        val text = if (t == null) {
+            "等待手环上报…\n（需打开手环上的体感开关）"
+        } else {
+            val fmt = java.util.Locale.US
+            "ax  %8.2f\n".format(fmt, t.ax) +
+                "ay  %8.2f\n".format(fmt, t.ay) +
+                "az  %8.2f\n".format(fmt, t.az) +
+                "角度 %7.1f°\n".format(fmt, t.angle) +
+                "方向 %s".format(t.dir)
+        }
+        if (sensorBox.text != text) sensorBox.text = text
     }
 
     private fun dirLabel(code: String): String = when (code) {
