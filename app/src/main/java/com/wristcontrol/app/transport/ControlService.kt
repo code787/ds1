@@ -145,6 +145,20 @@ class ControlService : Service() {
             DiagnoseLog.append(this, "指令: ping 不执行动作")
             return
         }
+        if (command is Command.SyncRequest) {
+            syncGestures()
+            return
+        }
+        if (command is Command.GestureHit) {
+            handleGesture(command.path)
+            return
+        }
+        if (command is Command.TiltState) {
+            tiltOn = command.on
+            DiagnoseLog.append(this, "体感开关: ${if (command.on) "开" else "关"}")
+            pushStatus()
+            return
+        }
         DiagnoseLog.append(this, "执行指令: ${command.javaClass.simpleName}")
         DiagnoseLog.append(this, "  无障碍服务就绪=${ControlAccessibilityService.Access.isReady()}")
 
@@ -183,6 +197,65 @@ class ControlService : Service() {
         DiagnoseLog.append(this, "  执行结果=$executed")
         // 只有真的执行成功才回执，失败不回执，手环会停在"已发送…"
         if (executed) ack()
+    }
+
+    /** 体感模式是否开启（由手环同步过来）。 */
+    @Volatile
+    private var tiltOn = false
+
+    private val gestureStore by lazy { com.wristcontrol.app.gesture.GestureStore(this) }
+
+    /**
+     * 手环识别出手势后，查映射并执行。
+     *
+     * 识别在手环、映射在手机：改映射不用重装 RPK。
+     * 匹配用编辑距离，没有足够接近的模板就不动——宁可没反应，也不猜错。
+     */
+    private fun handleGesture(pathText: String) {
+        val actual = com.wristcontrol.app.gesture.GestureCodec.decodePath(pathText)
+        DiagnoseLog.append(this, "手势: $pathText -> ${actual.joinToString(",")}")
+
+        val templates = gestureStore.load()
+        if (templates.isEmpty()) {
+            DiagnoseLog.append(this, "  -> 没有已学习的手势")
+            return
+        }
+
+        val hit = com.wristcontrol.app.gesture.GestureMatcher.bestMatch(actual, templates)
+        if (hit == null) {
+            DiagnoseLog.append(this, "  -> 没有匹配的模板（差太多，不执行）")
+            return
+        }
+
+        DiagnoseLog.append(this, "  -> 匹配到「${hit.name}」执行 ${hit.action}")
+        val cmd = when (hit.action) {
+            "back" -> Command.Back
+            "home" -> Command.Home
+            "recents" -> Command.Recents
+            "tap" -> Command.Tap
+            "screenoff" -> Command.ScreenOff
+            "volup" -> Command.Volume(1)
+            "voldown" -> Command.Volume(-1)
+            "up" -> Command.Move(0f, -1f)
+            "down" -> Command.Move(0f, 1f)
+            "left" -> Command.Move(-1f, 0f)
+            "right" -> Command.Move(1f, 0f)
+            else -> null
+        }
+        if (cmd == null) {
+            DiagnoseLog.append(this, "  -> 未知动作 ${hit.action}")
+            return
+        }
+        handleCommand(cmd)
+    }
+
+    /** 把手势模板推给手环。 */
+    private fun syncGestures() {
+        val list = gestureStore.load()
+        DiagnoseLog.append(this, "同步手势模板: ${list.size} 条")
+        transport.sendRaw(
+            com.wristcontrol.app.protocol.StatusCodec.encodeGestureSync(list),
+        )
     }
 
     private inline fun withGestures(block: (com.wristcontrol.app.input.GestureExecutor) -> Boolean): Boolean {

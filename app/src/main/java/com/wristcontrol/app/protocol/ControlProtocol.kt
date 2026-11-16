@@ -1,5 +1,6 @@
 package com.wristcontrol.app.protocol
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -29,6 +30,20 @@ sealed interface Command {
     /** 手环回执：表示某条状态帧已收到（手机端据此停止重发）。 */
     data class Ack(val refId: String) : Command
 
+    /**
+     * 手环识别出某个手势。
+     *
+     * 手环端只负责识别方向序列，**动作映射由手机端决定**——
+     * 这样改映射不用重装 RPK，也不用把用户的操作习惯存在手表上。
+     */
+    data class GestureHit(val path: String) : Command
+
+    /** 手环请求同步手势模板（刚启动或用户改了映射）。 */
+    data object SyncRequest : Command
+
+    /** 手环报告当前体感开关状态。 */
+    data class TiltState(val on: Boolean) : Command
+
     companion object {
         fun decode(raw: String): Command? = try {
             val o = JSONObject(raw)
@@ -45,6 +60,9 @@ sealed interface Command {
                 "screenoff" -> ScreenOff
                 "ping" -> Ping
                 "ack" -> Ack(o.optString("refId"))
+                "gesture" -> GestureHit(o.optString("path"))
+                "syncreq" -> SyncRequest
+                "tilt" -> TiltState(o.optBoolean("on", false))
                 else -> null
             }
         } catch (t: Throwable) {
@@ -60,7 +78,13 @@ sealed interface Command {
  * id 用于让手环回执，手机据此判断链路是否真的活着（SDK 的 Task 成功不算送达）。
  */
 object StatusCodec {
-    fun encode(id: String, link: String, battery: Int, listening: Boolean): ByteArray =
+    fun encode(
+        id: String,
+        link: String,
+        battery: Int,
+        listening: Boolean,
+        tiltOn: Boolean = false,
+    ): ByteArray =
         JSONObject().apply {
             put("v", 1)
             put("kind", "status")
@@ -68,6 +92,23 @@ object StatusCodec {
             put("link", link)
             put("battery", battery)
             put("listening", listening)
+            put("tilt", tiltOn)
+        }.toString().toByteArray(Charsets.UTF_8)
+
+    /** 手机 → 手环：下发手势模板列表。 */
+    fun encodeGestureSync(gestures: List<com.wristcontrol.app.gesture.Gesture>): ByteArray =
+        JSONObject().apply {
+            put("v", 1)
+            put("kind", "gsync")
+            val arr = JSONArray()
+            for (g in gestures) {
+                arr.put(JSONObject().apply {
+                    put("id", g.id)
+                    put("name", g.name)
+                    put("path", com.wristcontrol.app.gesture.GestureCodec.encodePath(g.path))
+                })
+            }
+            put("list", arr)
         }.toString().toByteArray(Charsets.UTF_8)
 
     /** 手机 → 手环的确认帧，用于告诉手环某条指令已执行。 */

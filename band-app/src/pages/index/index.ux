@@ -23,6 +23,14 @@
       <text class="pad-error" if="{{ errorText }}">{{ errorText }}</text>
     </div>
 
+    <!-- 体感开关行 -->
+    <div class="tilt-row">
+      <div class="tilt-switch {{ tiltOn ? 'tilt-on' : 'tilt-off' }}" onclick="toggleTilt">
+        <text class="tilt-label">体感 {{ tiltOn ? '开' : '关' }}</text>
+      </div>
+      <text class="tilt-hint">{{ tiltHint }}</text>
+    </div>
+
     <div class="keys">
       <div class="key" onclick="onBack"><text class="key-label">返回</text></div>
       <div class="key" onclick="onHome"><text class="key-label">主页</text></div>
@@ -43,6 +51,9 @@ export default {
     batteryText: "",
     padHint: "等待手机连接",
     errorText: "",
+    tiltOn: false,
+    tiltHint: "",
+    gestureText: "",
     diagOpen: false,
     diagCmd: "",
     diagCode: "",
@@ -78,6 +89,9 @@ export default {
   /** 由 app.ux 推送链路状态。 */
   onStatus(status) {
     const linkOk = status.link === "connected";
+    if (this.tiltOn !== (status.tiltOn === true)) {
+      this.tiltOn = status.tiltOn === true;
+    }
     const listening = status.listening === true;
 
     if (this.linkOk !== linkOk) this.linkOk = linkOk;
@@ -154,6 +168,42 @@ export default {
   onRecents() {
     if (!this.linkOk) return;
     this._send({ t: "recents" });
+  },
+
+  /** 切换体感开关。 */
+  toggleTilt() {
+    const app = this.$app.$def;
+    if (!app || typeof app.setTilt !== "function") return;
+    app.setTilt(!this.tiltOn);
+  },
+
+  /** app.ux 推送倾角方向（实时反馈）。 */
+  onTilt(hint, path) {
+    const on = this.tiltOn;
+    if (!on) return;
+    const p = path && path.length ? path.join("→") : "";
+    const text = hint ? "当前 " + hint + (p ? " | " + p : "") : (p ? p : "倾斜试试");
+    if (this.tiltHint !== text) this.tiltHint = text;
+  },
+
+  /** 识别到一个手势。 */
+  onGesture(text) {
+    const t = "手势 " + text;
+    if (this.gestureText !== t) this.gestureText = t;
+    if (this.tiltHint !== t) this.tiltHint = t;
+  },
+
+  /** 收到模板列表。 */
+  onTemplates(list) {
+    const n = Array.isArray(list) ? list.length : 0;
+    this.tiltHint = "模板 " + n + " 条";
+  },
+
+  /** 学习录制中的实时反馈。 */
+  onRecord(path, hint) {
+    const p = path && path.length ? path.join("→") : (hint || "");
+    const text = "录制中 " + p;
+    if (this.tiltHint !== text) this.tiltHint = text;
   },
 
   /** 长按触摸板：打开完整诊断层。 */
@@ -270,6 +320,23 @@ export default {
 .diag-title { font-size: 18px; color: #00ff99; font-weight: bold; margin-bottom: 6px; }
 .diag-line { font-size: 13px; color: #ffffff; margin-bottom: 4px; }
 .diag-tip { font-size: 12px; color: #666666; margin-top: auto; text-align: center; }
+.tilt-row {
+  flex-direction: row;
+  align-items: center;
+  height: 34px;
+  margin-bottom: 4px;
+}
+.tilt-switch {
+  width: 86px;
+  height: 30px;
+  border-radius: 15px;
+  justify-content: center;
+  align-items: center;
+}
+.tilt-on { background-color: #00aa66; }
+.tilt-off { background-color: #333333; }
+.tilt-label { font-size: 14px; color: #ffffff; text-align: center; }
+.tilt-hint { font-size: 13px; color: #00ff99; flex: 1; margin-left: 8px; }
 .keys { flex-direction: row; height: 62px; }
 .key {
   flex: 1;

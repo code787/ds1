@@ -135,6 +135,18 @@ class MainActivity : Activity() {
         })
 
         root.addView(Button(this).apply {
+            text = "手势控制（体感）"
+            setOnClickListener {
+                try {
+                    val panel = com.wristcontrol.app.gesture.GesturePanel(this@MainActivity)
+                    setContentView(panel.build())
+                } catch (t: Throwable) {
+                    statusText.text = "打开手势面板失败：${t.javaClass.simpleName}"
+                }
+            }
+        })
+
+        root.addView(Button(this).apply {
             text = "查看诊断日志"
             setOnClickListener {
                 val path = com.wristcontrol.app.transport.DiagnoseLog.path(this@MainActivity)

@@ -7,7 +7,8 @@
   "minPlatformVersion": 1000,
   "deviceTypeList": ["watch"],
   "features": [
-    { "name": "system.interconnect" }
+    { "name": "system.interconnect" },
+    { "name": "system.sensor" }
   ],
   "config": { "designWidth": 192 },
   "router": {

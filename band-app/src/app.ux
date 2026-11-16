@@ -1,5 +1,6 @@
 <script>
 const interconnect = require("@system.interconnect");
+const gestureLib = require("./common/gesture");
 
 /**
  * 手环端链路层。严格按小米官方示例 interconnect-demo 的形态写。
@@ -20,6 +21,12 @@ export default {
   battery: -1,
   listening: false,
   page: null,
+
+  // ---- 体感状态 ----
+  tiltOn: false,          // 开关
+  recording: false,       // 是否在学习录制
+  recorder: null,         // 当前录制器
+  sensorSubscribed: false,
 
   onCreate() {
     this._lastError = "";
@@ -53,6 +60,7 @@ export default {
   },
 
   onDestroy() {
+    this._unsubscribeSensor();
     const conn = this._connect;
     if (!conn) return;
     try {
@@ -69,6 +77,13 @@ export default {
       this._push();
       return;
     }
+    if (frame.kind === "gsync") {
+      this.applyGestureList(frame.list);
+      if (this.page && typeof this.page.onTemplates === "function") {
+        this.page.onTemplates(this._templates);
+      }
+      return;
+    }
     if (frame.kind === "ack") {
       if (this.page && typeof this.page.onAck === "function") this.page.onAck(frame.refId);
     }
@@ -76,7 +91,12 @@ export default {
 
   _push() {
     if (this.page && typeof this.page.onStatus === "function") {
-      this.page.onStatus({ link: this.onLink, battery: this.battery, listening: this.listening });
+      this.page.onStatus({
+        link: this.onLink,
+        battery: this.battery,
+        listening: this.listening,
+        tiltOn: this.tiltOn,
+      });
     }
   },
 
@@ -198,6 +218,126 @@ export default {
   },
 
   lastError() { return this._lastError || ""; },
+
+  // ================= 体感控制 =================
+
+  /** 开/关体感模式。开启时订阅加速度计。 */
+  setTilt(on) {
+    if (this.tiltOn === on) return;
+    this.tiltOn = on;
+    if (on) {
+      this._subscribeSensor();
+    } else {
+      this._unsubscribeSensor();
+    }
+    this.send({ t: "tilt", on: on });
+    this._push();
+  },
+
+  _subscribeSensor() {
+    if (this.sensorSubscribed) return;
+    try {
+      const sensor = require("@system.sensor");
+      this._sensor = sensor;
+      sensor.subscribeAccelerometer({
+        interval: gestureLib.INTERVAL,
+        callback: (ret) => this._onAccel(ret),
+        fail: (msg, code) => {
+          this._lastError = "传感器订阅失败 code=" + code;
+          this.tiltOn = false;
+          this._push();
+        },
+      });
+      this.sensorSubscribed = true;
+    } catch (e) {
+      this._lastError = "无法订阅传感器: " + errText(e);
+      this.tiltOn = false;
+      this._push();
+    }
+  },
+
+  _unsubscribeSensor() {
+    if (!this.sensorSubscribed) return;
+    try {
+      if (this._sensor) this._sensor.unsubscribeAccelerometer();
+    } catch (e) {
+      // 取消订阅失败不影响关闭
+    }
+    this.sensorSubscribed = false;
+  },
+
+  /**
+   * 加速度采样回调。
+   *
+   * 手环屏幕朝上时：x 左右、y 上下、z 垂直屏幕。
+   * 只用 x/y 算倾角；z 作为"是否戴在手上"的参考不参与识别。
+   */
+  _onAccel(ret) {
+    if (!ret) return;
+    const x = ret.x || 0;
+    const y = ret.y || 0;
+
+    if (this.recording && this.recorder) {
+      // 学习模式：喂给录制器
+      this.recorder.feed(x, y);
+      if (this.page && typeof this.page.onRecord === "function") {
+        this.page.onRecord(this.recorder.path(), this.recorder.hint());
+      }
+      return;
+    }
+
+    if (!this.tiltOn) return;
+
+    // 正常模式：实时手势识别
+    if (!this._live) this._live = gestureLib.createRecorder();
+    this._live.feed(x, y);
+
+    if (this.page && typeof this.page.onTilt === "function") {
+      this.page.onTilt(this._live.hint(), this._live.path());
+    }
+
+    // 静止足够久 -> 手势结束，尝试匹配
+    if (this._live.isIdle()) {
+      const path = this._live.finish();
+      this._live.start();
+      this._fireGesture(path);
+    }
+  },
+
+  /** 识别到一个手势，发给手机（映射在手机端做）。 */
+  _fireGesture(path) {
+    if (!path || path.length === 0) return;
+    const text = path.join(",");
+    this._lastGesture = text;
+    if (this.page && typeof this.page.onGesture === "function") {
+      this.page.onGesture(text);
+    }
+    this.send({ t: "gesture", path: text });
+  },
+
+  /** 开始学习录制。 */
+  startRecord() {
+    this.recording = true;
+    this.recorder = gestureLib.createRecorder();
+    this.recorder.start();
+    this._subscribeSensor();
+  },
+
+  /** 结束学习，返回录到的方向序列。 */
+  stopRecord() {
+    this.recording = false;
+    const path = this.recorder ? this.recorder.finish() : [];
+    this.recorder = null;
+    if (!this.tiltOn) this._unsubscribeSensor();
+    return path;
+  },
+
+  /** 接收手机下发的手势模板列表。 */
+  applyGestureList(list) {
+    this._templates = Array.isArray(list) ? list : [];
+  },
+
+  templates() { return this._templates || []; },
 
   /** 完整失败详情，供诊断层显示。 */
   lastDetail() {
