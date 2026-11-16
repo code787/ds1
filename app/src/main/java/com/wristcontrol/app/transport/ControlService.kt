@@ -210,6 +210,7 @@ class ControlService : Service() {
                 Command.SyncRequest -> false
                 is Command.TiltLive -> false
                 is Command.TiltState -> false
+                is Command.RawAccel -> false
             }
         } finally {
             try {
@@ -256,7 +257,6 @@ class ControlService : Service() {
 
     /** 供界面读实时状态。 */
     fun engineState(): com.wristcontrol.app.gesture.GestureEngine = engine
-    private val configStore by lazy { com.wristcontrol.app.gesture.GestureConfigStore(this) }
 
     /** 最近一次实时方向，供界面读取。 */
     @Volatile
