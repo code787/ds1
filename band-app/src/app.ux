@@ -1,409 +1,174 @@
 <script>
 const interconnect = require("@system.interconnect");
-const buzz = require("./common/buzz");
+const vibrator = require("@system.vibrator");
+const sensor = require("@system.sensor");
+const { parseFrame } = require("./common/protocol");
+
+const connect = interconnect.instance();
+const SEND_RETRY = 2;
 
 /**
- * 手环端链路层。严格按小米官方示例 interconnect-demo 的形态写。
+ * 与手机的链路层（CommonJS）。
  *
- * 官方示例的关键做法（我一开始全都漏了）：
- * 1. 每次用之前 this._connect = interconnect.instance() 重建实例，
- *    然后立刻重新绑定 onmessage / onopen / onclose / onerror。
- *    只在 onCreate 里绑一次，后面就收不到消息。
- * 2. 发送前用 getReadyState() 确认连接状态（1=连接成功）。
- * 3. send 的 success / fail 必须是函数，传字符串会走错误分支。
- * 4. 发送用 { data: ... } 对象形式。
+ * 收到的帧有两种：
+ * - kind=status：手机状态（链路、电量、手势服务是否开启）
+ * - kind=ack   ：手机确认收到某条指令
  *
- * 不使用 system.vibrator：require 未在 manifest features 声明的模块，
- * aiot-toolkit 会直接报 "Copy resource files error: missing feature"。
+ * 约束：
+ * - 收到 status 立刻回 ack，让手机知道链路活着；
+ * - 发送失败重试次数有上限，避免堆积；
+ * - 震动失败不影响功能。
  */
 export default {
-  onLink: "unknown",
-  battery: -1,
-  listening: false,
-  page: null,
-
-  // ---- 体感配置（由手机下发） ----
-  cfg: {
-    deadZone: 12,
-    holdMs: 120,
-    idleEndMs: 600,
-    // 手环横向佩戴：屏幕长边水平，加速度计 x/y 轴相对"用户以为的上下左右"
-    // 整体偏了 90 度。默认 90，用户可以在 App 里微调。
-    rotationOffset: 90,
-    // 匹配容错：0=必须完全一致，1=允许差一个方向，2=更宽松
-    tolerance: 1,
-    live: true,
-  },
-
-  // ---- 体感状态 ----
-  tiltOn: false,          // 开关
-  recording: false,       // 是否在学习录制
-  sensorSubscribed: false,
-
   onCreate() {
-    this._lastError = "";
-    this._rebuild();
-  },
+    this.page = null;
+    this.link = "connecting";
+    this.battery = -1;
+    this.listening = false;
 
-  _rebuild() {
+    // ---- 体感（只发原始数据，不做任何计算）----
+    this.tiltOn = false;
+    this.sensorSubscribed = false;
+
+    this._onMessage = (payload) => this.handleFrame(payload);
     try {
-      this._connect = interconnect.instance();
-      const conn = this._connect;
-      conn.onmessage = (res) => {
-        try {
-          const data = res && res.data !== undefined ? res.data : res;
-          let frame = data;
-          if (typeof data === "string") {
-            try { frame = JSON.parse(data); } catch (e) { frame = null; }
-          }
-          if (!frame || typeof frame !== "object") return;
-          this._handleFrame(frame);
-        } catch (err) {
-          // 单帧失败不影响后续
-        }
-      };
-      conn.onopen = () => {
-        this.onLink = "connected";
-        this._reconnectDelay = 0;
-        this._push();
-      };
-      conn.onclose = () => {
-        this.onLink = "disconnected";
-        this._push();
-        this._scheduleReconnect();
-      };
-      conn.onerror = () => {
-        this.onLink = "error";
-        this._push();
-        this._scheduleReconnect();
-      };
+      connect.onMessage(this._onMessage);
     } catch (e) {
-      this.onLink = "unavailable";
-      this._lastError = "instance 失败: " + errText(e);
+      console.error("onMessage 注册失败", e);
     }
-  },
-
-  /**
-   * 断线后自动重连。
-   *
-   * 蓝牙抖一下、手机锁屏、走远再回来，都会断开。
-   * 不做重连的话用户得手动重开 App——这是最影响体验的细节之一。
-   * 间隔从 1 秒起翻倍，最多 8 秒，避免频繁重建连接耗电。
-   */
-  _scheduleReconnect() {
-    if (this._reconnectTimer) return;
-    const delay = this._reconnectDelay > 0 ? this._reconnectDelay : 1000;
-    this._reconnectTimer = setTimeout(() => {
-      this._reconnectTimer = null;
-      this._rebuild();
-      this._reconnectDelay = Math.min(delay * 2, 8000);
-    }, delay);
   },
 
   onDestroy() {
-    if (this._reconnectTimer) {
-      clearTimeout(this._reconnectTimer);
-      this._reconnectTimer = null;
-    }
-    this._unsubscribeSensor();
-    const conn = this._connect;
-    if (!conn) return;
+    this._unsubscribe();
     try {
-      conn.onmessage = null; conn.onopen = null;
-      conn.onclose = null; conn.onerror = null;
-    } catch (e) { /* 解绑失败不影响退出 */ }
+      connect.offMessage(this._onMessage);
+    } catch (e) {
+      // 解绑失败不影响退出
+    }
   },
 
-  _handleFrame(frame) {
-    if (frame.kind === "status") {
-      this.onLink = frame.link === "connected" ? "connected" : "disconnected";
-      this.battery = typeof frame.battery === "number" ? frame.battery : -1;
-      this.listening = frame.listening === true;
-      // 状态帧只用于显示，**不主动改开关**。
-      //
-      // 之前这里按手机的 tilt 值订阅/退订传感器，而手机端 tiltOn 初始 false，
-      // 结果手环一连上就被强制关掉体感——用户点了开关，5 秒后又被关。
-      // 开关的主动权必须留在手环（用户手上），手机只做展示。
-      this._push();
-      return;
-    }
-    if (frame.kind === "cfg") {
-      if (typeof frame.deadZone === "number") this.cfg.deadZone = frame.deadZone;
-      if (typeof frame.holdMs === "number") this.cfg.holdMs = frame.holdMs;
-      if (typeof frame.idleEndMs === "number") this.cfg.idleEndMs = frame.idleEndMs;
-      if (typeof frame.rotationOffset === "number") this.cfg.rotationOffset = frame.rotationOffset;
-        if (typeof frame.tolerance === "number") this.cfg.tolerance = frame.tolerance;
-      if (typeof frame.live === "boolean") this.cfg.live = frame.live;
-      // 识别在手机端，手环不需要重建任何东西，只更新配置缓存
-      return;
-    }
+  attachPage(page) {
+    this.page = page;
+    this.pushStatus();
+  },
+
+  detachPage() {
+    this.page = null;
+  },
+
+  handleFrame(payload) {
+    const frame = parseFrame(payload);
+    if (!frame) return;
+
     if (frame.kind === "ack") {
-      if (this.page && typeof this.page.onAck === "function") this.page.onAck(frame.refId);
+      if (this.page) this.page.onAck(frame.refId);
+      return;
     }
+
+    this.link = frame.link;
+    this.battery = frame.battery;
+    this.listening = frame.listening;
+    this.pushStatus();
+    this.ack(frame.id);
   },
 
-  _push() {
-    if (this.page && typeof this.page.onStatus === "function") {
-      this.page.onStatus({
-        link: this.onLink,
-        battery: this.battery,
-        listening: this.listening,
-        tiltOn: this.tiltOn,
-        sensorError: this.sensorSubscribed ? "" : (this._lastError || ""),
-      });
-    }
-  },
-
-  attachPage(page) { this.page = page; this._push(); },
-  detachPage() { this.page = null; },
-
-  send(cmd, onResult) {
-    this._lastError = "";
+  ack(refId) {
     try {
-      // 闭源 ControlPhone 的做法：构造时建一次实例，之后一直复用，
-      // **不重建、不查 getApkStatus、不等待**，直接 send。
-      // 每次重建会让连接重新绑定，绑定期间状态必然未就绪。
-      if (!this._connect) this._rebuild();
-      const conn = this._connect;
-      if (!conn) {
-        this._lastError = "连接实例不可用";
-        if (onResult) onResult(false, this._lastError);
-        return false;
+      connect.send(JSON.stringify({ t: "ack", refId: refId || "status" }));
+    } catch (e) {
+      // ack 失败无需处理，下一次心跳会重新确认链路
+    }
+  },
+
+  pushStatus() {
+    if (!this.page) return;
+    this.page.onStatus({
+      link: this.link,
+      battery: this.battery,
+      listening: this.listening,
+      tiltOn: this.tiltOn,
+    });
+  },
+
+  /** 发送一条指令。返回 true 表示已交给链路层（不代表手机执行成功）。 */
+  send(cmd) {
+    const text = JSON.stringify(cmd);
+    for (let i = 0; i <= SEND_RETRY; i++) {
+      try {
+        connect.send(text);
+        return true;
+      } catch (e) {
+        if (i === SEND_RETRY) {
+          console.error("发送失败", e);
+          return false;
+        }
       }
-      // 官方示例 getData() 直接返回对象/字符串，**不自己 JSON.stringify**。
-      // 传字符串会被对端当非法格式（fail: invalid）。
-      // 这里直接传对象，让 SDK 自己序列化。
-      conn.send({
-        data: cmd,
-        success: () => { this._lastError = ""; if (onResult) onResult(true, ""); },
-        fail: (res, code) => {
-          const raw = res && res.data !== undefined ? res.data : errText(res);
-          this._lastError = String(raw);
-          this._lastCode = String(code === undefined ? "?" : code);
-          this._lastCmd = cmd && cmd.t ? cmd.t : "";
-          if (onResult) onResult(false, this._lastError);
-        },
-      });
-      return true;
-    } catch (e) {
-      this._lastError = "send 抛出: " + errText(e);
-      if (onResult) onResult(false, this._lastError);
-      return false;
     }
+    return false;
   },
 
   /**
-   * 查连接状态。
+   * 开/关体感。开启时订阅加速度计，只把原始 x/y/z 发给手机。
    *
-   * 官方实现里回调的 res.status 是**直接属性**（不是 res.data.status）：
-   *   success: (res) => { this.statusNum = res.status }
-   *   status == 1 连接成功，== 2 连接失败
+   * **不做任何计算**——滤波、方向判断、手势识别全在手机端。
+   * 这样手环端逻辑最简单，出问题也容易定位。
    */
-  readyState(onResult) {
-    try {
-      const conn = this._connect || interconnect.instance();
-      conn.getReadyState({
-        success: (res) => {
-          const status = res && res.status !== undefined ? res.status : -1;
-          this._readyState = status;
-          if (onResult) onResult(status);
-        },
-        fail: (res, code) => {
-          this._readyState = -1;
-          this._readyFail = "code=" + (code === undefined ? "?" : code);
-          if (onResult) onResult(-1);
-        },
-      });
-    } catch (e) {
-      if (onResult) onResult(-1);
-    }
-  },
-
-  /**
-   * 等链路可用再发送。
-   *
-   * 官方 onShow 里先 getApkStatusConnecting()：建连接 + 查 getApkStatus()。
-   * 这个状态决定能不能发——不看它直接 send 就会 not connected。
-   * apkStatus 是同步返回值，这里轮询等它变成可用状态。
-   */
-  /**
-   * 查一次链路状态，**不重建连接**。
-   *
-   * 闭源 ControlPhone 压根不查这个就直接 send，说明它不该作为发送前置条件。
-   * 这里只用来在诊断层显示，不阻塞发送。
-   */
-  waitReady(onResult) {
-    let status = -1;
-    try {
-      if (!this._connect) this._rebuild();
-      status = this._connect && typeof this._connect.getApkStatus === "function"
-        ? this._connect.getApkStatus()
-        : -1;
-    } catch (e) {
-      status = -1;
-    }
-    this._apkStatus = status;
-    // 永远回调 true：不让状态查询挡住发送
-    if (onResult) onResult(true, status);
-  },
-
-  /** 官方提供的另一个状态接口：同步返回 apkStatus。 */
-  apkStatus() {
-    try {
-      const conn = this._connect || interconnect.instance();
-      return conn && typeof conn.getApkStatus === "function" ? conn.getApkStatus() : -1;
-    } catch (e) {
-      return -1;
-    }
-  },
-
-  /** 官方诊断接口：拿更详细的连接诊断码。 */
-  diagnosis(onResult) {
-    try {
-      const conn = this._connect || interconnect.instance();
-      conn.diagnosis({
-        timeout: 2000,
-        success: (res) => { if (onResult) onResult("ok status=" + (res && res.status)); },
-        fail: (res, code) => { if (onResult) onResult("fail code=" + code); },
-      });
-    } catch (e) {
-      if (onResult) onResult("抛出: " + errText(e));
-    }
-  },
-
-  lastError() { return this._lastError || ""; },
-
-  // ================= 体感控制 =================
-
-  /** 开/关体感模式。开启时订阅加速度计。 */
   setTilt(on) {
-    // 不提前返回：即使状态相同也要重试订阅。
-    // 之前 if (this.tiltOn === on) return; 导致
-    // 订阅失败后状态卡在 true，再点也没反应。
     this.tiltOn = on;
     if (on) {
-      this._subscribeSensor();
+      this._subscribe();
     } else {
-      this._unsubscribeSensor();
+      this._unsubscribe();
     }
     this.send({ t: "tilt", on: on });
-    this._push();
+    this.pushStatus();
   },
 
-  /**
-   * 订阅加速度计。
-   *
-   * 关键时序问题（踩过）：
-   * subscribeAccelerometer 的回调是异步的。如果先无条件写
-   *   this.sensorSubscribed = true;
-   * 而 fail 回调又把 false 写回去，两者顺序不定，最终可能卡在 true——
-   * 于是之后每次点开关都被 if (this.sensorSubscribed) return 挡住，永远重试不了。
-   *
-   * 现在：先用 _subscribing 标记防重入，只认回调里的结果。
-   */
-  _subscribeSensor() {
-    // 回到 v1.0 的简单做法——那版实测可用。
-    // 之前加过「等第一帧回调才算成功」的写法，反而卡住了：
-    // _subscribing 标记如果因为回调既不成功也不失败而停在 true，
-    // 之后每次点开关都被 if (sensorSubscribed || _subscribing) return 挡住，
-    // 永远订阅不了。简单可靠比「严谨」重要。
+  _subscribe() {
     if (this.sensorSubscribed) return;
     try {
-      const sensor = require("@system.sensor");
-      this._sensor = sensor;
       sensor.subscribeAccelerometer({
-        // 直接写死，不从 gesture.js 取——webpack 打包后 gestureLib.INTERVAL 是 undefined，
-        // interval 传 undefined 会导致订阅失败。
         interval: "game",
-        callback: (ret) => this._onAccel(ret),
+        callback: (ret) => {
+          if (!ret) return;
+          if (!this.tiltOn) return;
+          // 只发原始值，一个字节的计算都不做
+          this.send({
+            t: "raw",
+            x: ret.x,
+            y: ret.y,
+            z: ret.z === undefined ? 0 : ret.z,
+          });
+        },
         fail: (msg, code) => {
-          // 失败只记录原因，不改变开关状态（开关是用户意图）
-          this._lastError = "传感器订阅失败 code=" + code + " msg=" + (msg || "");
           this.sensorSubscribed = false;
-          this._push();
           this.send({ t: "sensor", ok: false, msg: "code=" + code });
         },
       });
       this.sensorSubscribed = true;
-      this._lastError = "";
-      this._push();
-      this.send({ t: "sensor", ok: true, msg: "订阅已发起" });
+      this.send({ t: "sensor", ok: true, msg: "已订阅" });
     } catch (e) {
-      this._lastError = "无法订阅传感器: " + errText(e);
       this.sensorSubscribed = false;
-      this._push();
-      this.send({ t: "sensor", ok: false, msg: errText(e) });
+      this.send({ t: "sensor", ok: false, msg: String(e) });
     }
   },
 
-  _unsubscribeSensor() {
+  _unsubscribe() {
     if (!this.sensorSubscribed) return;
     try {
-      if (this._sensor) this._sensor.unsubscribeAccelerometer();
+      sensor.unsubscribeAccelerometer();
     } catch (e) {
       // 取消订阅失败不影响关闭
     }
     this.sensorSubscribed = false;
   },
 
-  /**
-   * 加速度采样回调。
-   *
-   * **手环只做一件事：把原始值发出去。**
-   * 滤波、方向判断、手势识别全部在手机端做。
-   *
-   * 为什么不在手环算：
-   * - 改算法/调参数要重装 RPK，手机上改立即生效
-   * - 手环算完只发结果，出问题看不到中间过程
-   * - 手环算力弱，卡尔曼跑在手机上更从容
-   *
-   * 代价是蓝牙流量大（20ms 一条），所以只在体感开启时发。
-   */
-  _onAccel(ret) {
-    if (!ret) return;
-
-    // 学习模式和识别模式都要原始数据，统一发给手机
-    if (this.tiltOn || this.recording) {
-      this.send({
-        t: "raw",
-        x: ret.x,
-        y: ret.y,
-        z: ret.z === undefined ? 0 : ret.z,
-        rec: this.recording,
-      });
+  buzz() {
+    try {
+      vibrator.start({ mode: "short", count: 1 });
+    } catch (e) {
+      // 手环不支持震动时不影响功能
     }
   },
-
-  /**
-   * 开始学习录制。
-   *
-   * 手环只标记 recording=true，让 _onAccel 继续发原始数据。
-   * 识别逻辑全在手机端，所以这里不需要录制器。
-   */
-  startRecord() {
-    this.recording = true;
-    this._subscribeSensor();
-  },
-
-  /** 结束学习。识别结果由手机端自己算，这里只需停止标记。 */
-  stopRecord() {
-    this.recording = false;
-    if (!this.tiltOn) this._unsubscribeSensor();
-    return [];
-  },
-
-
-
-  /** 完整失败详情，供诊断层显示。 */
-  lastDetail() {
-    return { cmd: this._lastCmd || "", code: this._lastCode || "", msg: this._lastError || "" };
-  },
-  buzz() { /* 不用 vibrator */ },
 };
-
-function errText(e) {
-  if (!e) return "unknown";
-  if (e.message) return String(e.message);
-  try { return JSON.stringify(e); } catch (x) { return String(e); }
-}
 </script>
