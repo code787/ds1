@@ -155,7 +155,9 @@ class GestureEngine(private var config: GestureConfig = GestureConfig()) {
         val angle = ((Math.toDegrees(atan2(y, x)) + config.rotationOffset) % 360 + 360) % 360
         lastAngle = angle.toFloat()
 
-        // 2. 死区
+        val now = System.currentTimeMillis()
+
+        // 2. 死区判定
         val dir = if (mag < config.deadZone) null else when {
             angle < 45 || angle >= 315 -> "E"
             angle < 135 -> "N"
@@ -164,50 +166,51 @@ class GestureEngine(private var config: GestureConfig = GestureConfig()) {
         }
 
         if (dir == null) {
+            // 回到死区：重置方向追踪，但**不能提前 return**——
+            // 手势结束检测必须照样执行，否则 steps 永远提交不了。
             current = null
             currentSince = 0
             candidate = null
             candidateCount = 0
             lastDir = ""
-            return null
-        }
-
-        // 3. 连续帧确认：滤掉单帧跳变
-        if (dir == candidate) {
-            candidateCount++
         } else {
-            candidate = dir
-            candidateCount = 1
-        }
-        if (candidateCount < CONFIRM_FRAMES) return null
+            // 3. 连续帧确认：滤掉单帧跳变
+            if (dir == candidate) {
+                candidateCount++
+            } else {
+                candidate = dir
+                candidateCount = 1
+            }
 
-        lastDir = dir
+            if (candidateCount >= CONFIRM_FRAMES) {
+                lastDir = dir
 
-        if (dir != current) {
-            current = dir
-            currentSince = System.currentTimeMillis()
-            return null
-        }
-
-        // 4. 同方向持续够久才算一个 step
-        val now = System.currentTimeMillis()
-        if (now - currentSince >= config.holdMs) {
-            val last = steps.lastOrNull()
-            if (last != dir && steps.size < MAX_STEPS) {
-                steps.add(dir)
-                lastMoveAt = now
+                if (dir != current) {
+                    current = dir
+                    currentSince = now
+                } else if (now - currentSince >= config.holdMs) {
+                    // 4. 同方向持续够久才算一个 step
+                    val last = steps.lastOrNull()
+                    if (last != dir && steps.size < MAX_STEPS) {
+                        steps.add(dir)
+                        lastMoveAt = now
+                    }
+                }
             }
         }
 
-        // 5. 静止够久 -> 手势结束
+        // 5. 手势结束判定——**不管有没有倾斜都要查**
         if (steps.isNotEmpty() && now - lastMoveAt >= config.idleEndMs) {
             val out = steps.toList()
             steps.clear()
             current = null
             currentSince = 0
+            candidate = null
+            candidateCount = 0
             if (!recording) onGesture?.invoke(out)
             return out
         }
+
         return null
     }
 
