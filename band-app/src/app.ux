@@ -121,11 +121,11 @@ export default {
       this.onLink = frame.link === "connected" ? "connected" : "disconnected";
       this.battery = typeof frame.battery === "number" ? frame.battery : -1;
       this.listening = frame.listening === true;
-      // 体感开关以手机端为准：手机重启后手环要跟上，不能各说各话
-      if (typeof frame.tilt === "boolean" && frame.tilt !== this.tiltOn) {
-        this.tiltOn = frame.tilt;
-        if (frame.tilt) this._subscribeSensor(); else this._unsubscribeSensor();
-      }
+      // 状态帧只用于显示，**不主动改开关**。
+      //
+      // 之前这里按手机的 tilt 值订阅/退订传感器，而手机端 tiltOn 初始 false，
+      // 结果手环一连上就被强制关掉体感——用户点了开关，5 秒后又被关。
+      // 开关的主动权必须留在手环（用户手上），手机只做展示。
       this._push();
       return;
     }
