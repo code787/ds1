@@ -82,6 +82,12 @@ sealed interface Command {
                 "tiltlive" -> TiltLive(
                     dir = o.optString("dir"),
                     path = o.optString("path"),
+                    // 这四个字段之前漏了——只解析 dir/path，
+                    // 导致手环明明发了加速度，手机端拿到的永远是 0。
+                    ax = o.optDouble("ax", 0.0).toFloat(),
+                    ay = o.optDouble("ay", 0.0).toFloat(),
+                    az = o.optDouble("az", 0.0).toFloat(),
+                    angle = o.optDouble("angle", 0.0).toFloat(),
                 )
                 else -> null
             }
