@@ -8,7 +8,8 @@
   "deviceTypeList": ["watch"],
   "features": [
     { "name": "system.interconnect" },
-    { "name": "system.sensor" }
+    { "name": "system.sensor" },
+    { "name": "system.vibrator" }
   ],
   "config": { "designWidth": 192 },
   "router": {
