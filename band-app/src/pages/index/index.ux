@@ -12,7 +12,9 @@
       <text class="diag-line" if="{{ diagCmd }}">指令: {{ diagCmd }}</text>
       <text class="diag-line" if="{{ diagCode }}">code: {{ diagCode }}</text>
       <text class="diag-line" if="{{ diagMsg }}">msg: {{ diagMsg }}</text>
-      <text class="diag-line" if="{{ diagReady }}">链路: {{ diagReady }}</text>
+      <text class="diag-line" if="{{ diagReady }}">{{ diagReady }}</text>
+      <text class="diag-line" if="{{ diagApk }}">{{ diagApk }}</text>
+      <text class="diag-line" if="{{ diagDiag }}">{{ diagDiag }}</text>
       <text class="diag-tip">点任意处关闭</text>
     </div>
 
@@ -46,6 +48,8 @@ export default {
     diagCode: "",
     diagMsg: "",
     diagReady: "",
+    diagApk: "",
+    diagDiag: "",
   },
 
   onInit() {
@@ -164,7 +168,18 @@ export default {
     }
     if (app && typeof app.readyState === "function") {
       app.readyState((status) => {
-        this.diagReady = status === 1 ? "已就绪" : "状态=" + status;
+        const label = status === 1 ? "就绪" : (status === 2 ? "失败" : "未知");
+        this.diagReady = "readyState=" + status + "(" + label + ")";
+      });
+    }
+    // 官方另有两个诊断接口，一起显示，便于对比
+    if (app && typeof app.apkStatus === "function") {
+      const apk = app.apkStatus();
+      this.diagApk = "apkStatus=" + apk;
+    }
+    if (app && typeof app.diagnosis === "function") {
+      app.diagnosis((res) => {
+        this.diagDiag = "diagnosis: " + res;
       });
     }
   },

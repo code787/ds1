@@ -115,14 +115,55 @@ export default {
     }
   },
 
+  /**
+   * 查连接状态。
+   *
+   * 官方实现里回调的 res.status 是**直接属性**（不是 res.data.status）：
+   *   success: (res) => { this.statusNum = res.status }
+   *   status == 1 连接成功，== 2 连接失败
+   */
   readyState(onResult) {
     try {
       const conn = this._connect || interconnect.instance();
       conn.getReadyState({
-        success: (res) => { if (onResult) onResult(res && res.status !== undefined ? res.status : -1); },
-        fail: () => { if (onResult) onResult(-1); },
+        success: (res) => {
+          const status = res && res.status !== undefined ? res.status : -1;
+          this._readyState = status;
+          if (onResult) onResult(status);
+        },
+        fail: (res, code) => {
+          this._readyState = -1;
+          this._readyFail = "code=" + (code === undefined ? "?" : code);
+          if (onResult) onResult(-1);
+        },
       });
-    } catch (e) { if (onResult) onResult(-1); }
+    } catch (e) {
+      if (onResult) onResult(-1);
+    }
+  },
+
+  /** 官方提供的另一个状态接口：同步返回 apkStatus。 */
+  apkStatus() {
+    try {
+      const conn = this._connect || interconnect.instance();
+      return conn && typeof conn.getApkStatus === "function" ? conn.getApkStatus() : -1;
+    } catch (e) {
+      return -1;
+    }
+  },
+
+  /** 官方诊断接口：拿更详细的连接诊断码。 */
+  diagnosis(onResult) {
+    try {
+      const conn = this._connect || interconnect.instance();
+      conn.diagnosis({
+        timeout: 2000,
+        success: (res) => { if (onResult) onResult("ok status=" + (res && res.status)); },
+        fail: (res, code) => { if (onResult) onResult("fail code=" + code); },
+      });
+    } catch (e) {
+      if (onResult) onResult("抛出: " + errText(e));
+    }
   },
 
   lastError() { return this._lastError || ""; },
