@@ -188,6 +188,12 @@ class ControlService : Service() {
             }
             return
         }
+        if (command is Command.SensorState) {
+            sensorOk = command.ok
+            sensorMsg = command.msg
+            DiagnoseLog.append(this, "传感器订阅: ${if (command.ok) "成功" else "失败"} ${command.msg}")
+            return
+        }
         if (command is Command.TiltState) {
             tiltOn = command.on
             tiltEnabled = command.on
@@ -252,6 +258,14 @@ class ControlService : Service() {
     /** 收到多少条实时数据。用来区分「手环没发」和「发了但没显示」。 */
     @Volatile
     var tiltCount: Int = 0
+
+    /** 手环传感器是否订阅成功。 */
+    @Volatile
+    var sensorOk: Boolean = false
+
+    /** 订阅失败原因。 */
+    @Volatile
+    var sensorMsg: String = ""
 
     /** 手环当前体感开关状态。 */
     @Volatile

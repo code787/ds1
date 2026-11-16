@@ -322,6 +322,8 @@ export default {
             this._subscribing = false;
             this._lastError = "";
             this._push();
+            // 通知手机：传感器真的通了
+            this.send({ t: "sensor", ok: true, msg: "第一帧已收到" });
           }
           this._onAccel(ret);
         },
@@ -330,6 +332,8 @@ export default {
           this.sensorSubscribed = false;
           this._lastError = "传感器订阅失败 code=" + code + " msg=" + (msg || "");
           this._push();
+          // 通知手机：订阅失败了，把错误码带过去
+          this.send({ t: "sensor", ok: false, msg: "code=" + code + " msg=" + (msg || "") });
         },
       });
       // 注意：这里**不**置 sensorSubscribed，等回调确认
