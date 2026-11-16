@@ -25,9 +25,10 @@ var IDLE_END_MS = 600;
  * 把倾角映射到八方向。
  * x 向右为正，y 向上为正；死区内返回 null。
  */
-function toDir(x, y) {
+function toDir(x, y, deadZone) {
+  var dz = (typeof deadZone === "number") ? deadZone : DEAD_ZONE;
   var mag = Math.sqrt(x * x + y * y);
-  if (mag < DEAD_ZONE) return null;
+  if (mag < dz) return null;
   var angle = Math.atan2(y, x) * 180 / Math.PI;
   var n = ((angle % 360) + 360) % 360;
   if (n < 22.5 || n >= 337.5) return "E";
@@ -49,7 +50,11 @@ function toDir(x, y) {
  *   r.feed(ax, ay);       // 每次采样喂进来
  *   var path = r.finish(); // 结束，拿方向序列
  */
-function createRecorder() {
+function createRecorder(opts) {
+  var o = opts || {};
+  var deadZone = typeof o.deadZone === "number" ? o.deadZone : DEAD_ZONE;
+  var holdMs = typeof o.holdMs === "number" ? o.holdMs : HOLD_MS;
+  var idleEndMs = typeof o.idleEndMs === "number" ? o.idleEndMs : IDLE_END_MS;
   var steps = [];
   var current = null;
   var currentSince = 0;
@@ -65,7 +70,7 @@ function createRecorder() {
 
     feed: function (x, y) {
       var now = Date.now();
-      var dir = toDir(x, y);
+      var dir = toDir(x, y, deadZone);
 
       if (dir === null) {
         // 回到死区：方向断开
@@ -81,7 +86,7 @@ function createRecorder() {
       }
 
       // 同方向持续够久才算数
-      if (now - currentSince >= HOLD_MS) {
+      if (now - currentSince >= holdMs) {
         var last = steps.length > 0 ? steps[steps.length - 1] : null;
         if (last !== dir) {
           if (steps.length < MAX_STEPS) {
@@ -94,7 +99,7 @@ function createRecorder() {
 
     /** 是否已经静止足够久（可以结束录制）。 */
     isIdle: function () {
-      return steps.length > 0 && Date.now() - lastMoveAt >= IDLE_END_MS;
+      return steps.length > 0 && Date.now() - lastMoveAt >= idleEndMs;
     },
 
     /** 当前已录到的方向，用于界面实时显示。 */

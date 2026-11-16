@@ -2,45 +2,97 @@ package com.wristcontrol.app.gesture
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 
 /**
- * 手势管理界面：学习新手势、查看已有手势、删除。
+ * 手势控制面板：阈值调节 + 实时诊断 + 手势管理。
  *
- * 刻意做成最简单的列表：这个 App 的价值在手环侧，手机端是配置页。
+ * 三块内容：
+ * 1. 实时诊断：显示手环当前识别到的方向（左上/右上…）
+ * 2. 阈值调节：死区、保持时长、容错，改完立即下发
+ * 3. 手势列表：学习、查看、删除
  */
 class GesturePanel(private val activity: Activity) {
 
     private val store = GestureStore(activity)
+    private val cfgStore = GestureConfigStore(activity)
+    private var cfg = cfgStore.load()
+
     private val root = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(48, 32, 48, 48)
     }
-    private val listBox = LinearLayout(activity).apply {
-        orientation = LinearLayout.VERTICAL
+    private val listBox = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+    private val liveBox = TextView(activity).apply {
+        textSize = 22f
+        setPadding(0, 16, 0, 16)
+    }
+    private val liveSub = TextView(activity).apply {
+        textSize = 14f
+        setPadding(0, 0, 0, 16)
+    }
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val poller = object : Runnable {
+        override fun run() {
+            refreshLive()
+            handler.postDelayed(this, 150)
+        }
     }
 
     fun build(): ScrollView {
         root.addView(TextView(activity).apply {
-            text = "手势控制"
+            text = "体感手势"
             textSize = 20f
         })
 
+        // ---- 实时诊断 ----
         root.addView(TextView(activity).apply {
-            text = "打开手环上的「体感」开关，倾斜手腕画出方向序列。\n" +
-                "八方向两两组合，最多 64 种手势。\n\n" +
-                "手环只有加速度计、没有陀螺仪，所以识别的是「倾斜方向」\n" +
-                "而不是空中轨迹——倾角是绝对测量，不会漂移。"
-            textSize = 14f
-            setPadding(0, 16, 0, 24)
+            text = "实时诊断"
+            textSize = 16f
+            setPadding(0, 24, 0, 4)
+        })
+        root.addView(TextView(activity).apply {
+            text = "打开手环上的「体感」开关，倾斜手腕即可看到方向。"
+            textSize = 13f
+        })
+        root.addView(liveBox)
+        root.addView(liveSub)
+
+        // ---- 阈值调节 ----
+        root.addView(TextView(activity).apply {
+            text = "识别参数"
+            textSize = 16f
+            setPadding(0, 16, 0, 8)
         })
 
+        addSlider("死区角度", "倾斜小于这个角度视为没动。越小越灵敏", 4, 40, cfg.deadZone) { v ->
+            cfg = cfg.copy(deadZone = v)
+            applyCfg()
+        }
+        addSlider("方向保持", "同一方向需持续多久才确认。越小越跟手", 40, 500, cfg.holdMs) { v ->
+            cfg = cfg.copy(holdMs = v)
+            applyCfg()
+        }
+        addSlider("静止判定", "停多久算手势结束。越大越不容易被切断", 200, 2000, cfg.idleEndMs) { v ->
+            cfg = cfg.copy(idleEndMs = v)
+            applyCfg()
+        }
+        addSlider("匹配容错", "允许差几个方向。0=必须完全一致", 0, 2, cfg.tolerance) { v ->
+            cfg = cfg.copy(tolerance = v)
+            applyCfg()
+        }
+
+        // ---- 手势列表 ----
         root.addView(Button(activity).apply {
             text = "＋ 学习新手势"
             setOnClickListener { startLearn() }
@@ -54,8 +106,79 @@ class GesturePanel(private val activity: Activity) {
         root.addView(listBox)
 
         refresh()
-
         return ScrollView(activity).apply { addView(root) }
+    }
+
+    /** 页面显示时开始轮询实时方向。 */
+    fun onResume() {
+        handler.removeCallbacks(poller)
+        handler.post(poller)
+    }
+
+    fun onPause() {
+        handler.removeCallbacks(poller)
+    }
+
+    private fun refreshLive() {
+        val svc = com.wristcontrol.app.transport.ServiceRef.current
+        if (svc == null) {
+            if (liveBox.text != "桥接未启动") liveBox.text = "桥接未启动"
+            if (liveSub.text != "先去主页点「启动桥接」") liveSub.text = "先去主页点「启动桥接」"
+            return
+        }
+        val dir = svc.lastLiveDir
+        val path = svc.lastLivePath
+        val label = dirLabel(dir)
+        if (liveBox.text != label) liveBox.text = label
+        val sub = if (path.isNotEmpty()) "本次序列: $path" else "还没识别到方向"
+        if (liveSub.text != sub) liveSub.text = sub
+    }
+
+    private fun dirLabel(code: String): String = when (code) {
+        "N" -> "⬆ 上"
+        "NE" -> "↗ 右上"
+        "E" -> "➡ 右"
+        "SE" -> "↘ 右下"
+        "S" -> "⬇ 下"
+        "SW" -> "↙ 左下"
+        "W" -> "⬅ 左"
+        "NW" -> "↖ 左上"
+        else -> "— 未倾斜"
+    }
+
+    private fun addSlider(title: String, hint: String, min: Int, max: Int, value: Int, onChange: (Int) -> Unit) {
+        val valueLabel = TextView(activity).apply {
+            text = "$title: $value"
+            textSize = 15f
+        }
+        root.addView(LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 16, 0, 0)
+            addView(valueLabel)
+            addView(TextView(activity).apply {
+                text = hint
+                textSize = 12f
+            })
+            addView(SeekBar(activity).apply {
+                this.max = max - min
+                progress = (value - min).coerceIn(0, max - min)
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                        if (!fromUser) return
+                        val v = min + p
+                        valueLabel.text = "$title: $v"
+                        onChange(v)
+                    }
+                    override fun onStartTrackingTouch(sb: SeekBar?) {}
+                    override fun onStopTrackingTouch(sb: SeekBar?) {}
+                })
+            })
+        })
+    }
+
+    private fun applyCfg() {
+        cfgStore.save(cfg)
+        com.wristcontrol.app.transport.ServiceRef.current?.pushConfig()
     }
 
     private fun refresh() {
@@ -73,13 +196,11 @@ class GesturePanel(private val activity: Activity) {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(0, 12, 0, 12)
-
                 addView(TextView(activity).apply {
                     text = g.path.joinToString(" → ") + "\n" + g.name + " → " + actionLabel(g.action)
                     textSize = 15f
                     layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
                 })
-
                 addView(Button(activity).apply {
                     text = "删除"
                     setOnClickListener {
@@ -92,15 +213,15 @@ class GesturePanel(private val activity: Activity) {
         }
     }
 
-    /** 开始学习：提示用户去手环上做动作，然后选择识别结果。 */
     private fun startLearn() {
-        val directions = arrayOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")
+        val dirs = arrayOf("N 上", "NE 右上", "E 右", "SE 右下", "S 下", "SW 左下", "W 左", "NW 左上")
+        val codes = arrayOf("N", "NE", "E", "SE", "S", "SW", "W", "NW")
         val first = arrayOfNulls<String>(1)
 
         AlertDialog.Builder(activity)
-            .setTitle("第一步：选第一个方向")
-            .setItems(directions) { _, which ->
-                first[0] = directions[which]
+            .setTitle("第一步：第一个方向")
+            .setItems(dirs) { _, which ->
+                first[0] = codes[which]
                 chooseSecond(first[0]!!)
             }
             .setNegativeButton("取消", null)
@@ -108,11 +229,12 @@ class GesturePanel(private val activity: Activity) {
     }
 
     private fun chooseSecond(firstDir: String) {
-        val directions = arrayOf("（只要一个方向）", "N", "NE", "E", "SE", "S", "SW", "W", "NW")
+        val dirs = arrayOf("（只要一个方向）", "N 上", "NE 右上", "E 右", "SE 右下", "S 下", "SW 左下", "W 左", "NW 左上")
+        val codes = arrayOf("", "N", "NE", "E", "SE", "S", "SW", "W", "NW")
         AlertDialog.Builder(activity)
-            .setTitle("第二步：选第二个方向（可跳过）")
-            .setItems(directions) { _, which ->
-                val path = if (which == 0) listOf(firstDir) else listOf(firstDir, directions[which])
+            .setTitle("第二步：第二个方向（可跳过）")
+            .setItems(dirs) { _, which ->
+                val path = if (which == 0) listOf(firstDir) else listOf(firstDir, codes[which])
                 chooseAction(path)
             }
             .setNegativeButton("取消", null)
@@ -122,7 +244,6 @@ class GesturePanel(private val activity: Activity) {
     private fun chooseAction(path: List<String>) {
         val actions = arrayOf("返回", "主页", "多任务", "点击", "上滑", "下滑", "左滑", "右滑", "音量+", "音量-", "锁屏")
         val codes = arrayOf("back", "home", "recents", "tap", "up", "down", "left", "right", "volup", "voldown", "screenoff")
-
         AlertDialog.Builder(activity)
             .setTitle("第三步：绑定操作")
             .setItems(actions) { _, which ->
@@ -134,7 +255,7 @@ class GesturePanel(private val activity: Activity) {
                 )
                 store.add(g)
                 refresh()
-                Toast.makeText(activity, "已保存：$path → ${actions[which]}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(activity, "已保存", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("取消", null)
             .show()

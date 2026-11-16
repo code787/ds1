@@ -70,6 +70,7 @@ class ControlService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        ServiceRef.attach(this)
         // 这一段整体兜底：哪怕取系统服务失败，也不能让进程死掉
         try {
             power = getSystemService(Context.POWER_SERVICE) as? PowerManager
@@ -153,6 +154,13 @@ class ControlService : Service() {
             handleGesture(command.path)
             return
         }
+        if (command is Command.TiltLive) {
+            lastLiveDir = command.dir
+            lastLivePath = command.path
+            DiagnoseLog.append(this, "实时方向: dir=${command.dir} path=${command.path}")
+            liveListener?.invoke(command.dir, command.path)
+            return
+        }
         if (command is Command.TiltState) {
             tiltOn = command.on
             DiagnoseLog.append(this, "体感开关: ${if (command.on) "开" else "关"}")
@@ -204,6 +212,33 @@ class ControlService : Service() {
     private var tiltOn = false
 
     private val gestureStore by lazy { com.wristcontrol.app.gesture.GestureStore(this) }
+    private val configStore by lazy { com.wristcontrol.app.gesture.GestureConfigStore(this) }
+
+    /** 最近一次实时方向，供界面读取。 */
+    @Volatile
+    var lastLiveDir: String = ""
+        private set
+    @Volatile
+    var lastLivePath: String = ""
+        private set
+
+    /** 实时方向的监听器；界面注册后能拿到每一帧。 */
+    @Volatile
+    var liveListener: ((String, String) -> Unit)? = null
+
+    /** 把当前配置下发给手环。 */
+    fun pushConfig() {
+        val c = configStore.load()
+        DiagnoseLog.append(this, "下发配置: 死区=${c.deadZone}° 保持=${c.holdMs}ms 静止=${c.idleEndMs}ms")
+        transport.sendRaw(
+            com.wristcontrol.app.protocol.StatusCodec.encodeConfigSync(
+                deadZone = c.deadZone,
+                holdMs = c.holdMs,
+                idleEndMs = c.idleEndMs,
+                live = c.showLive,
+            ),
+        )
+    }
 
     /**
      * 手环识别出手势后，查映射并执行。
@@ -256,6 +291,7 @@ class ControlService : Service() {
         transport.sendRaw(
             com.wristcontrol.app.protocol.StatusCodec.encodeGestureSync(list),
         )
+        pushConfig()
     }
 
     private inline fun withGestures(block: (com.wristcontrol.app.input.GestureExecutor) -> Boolean): Boolean {
@@ -385,6 +421,7 @@ class ControlService : Service() {
     }
 
     override fun onDestroy() {
+        ServiceRef.detach(this)
         running = false
         try {
             handler.removeCallbacks(heartbeatTask)

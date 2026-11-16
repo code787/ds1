@@ -24,6 +24,10 @@ export default {
 
   // ---- 体感状态 ----
   tiltOn: false,          // 开关
+  cfgDeadZone: 12,        // 死区角度（度），由手机下发
+  cfgHoldMs: 120,         // 方向保持时长
+  cfgIdleEndMs: 600,      // 静止判定
+  cfgLive: true,          // 是否实时上报方向（诊断）
   recording: false,       // 是否在学习录制
   recorder: null,         // 当前录制器
   sensorSubscribed: false,
@@ -75,6 +79,22 @@ export default {
       this.battery = typeof frame.battery === "number" ? frame.battery : -1;
       this.listening = frame.listening === true;
       this._push();
+      return;
+    }
+    if (frame.kind === "cfg") {
+      // 手机端下发的识别参数：死区、保持时长、静止判定、是否实时上报
+      if (typeof frame.deadZone === "number") this.cfgDeadZone = frame.deadZone;
+      if (typeof frame.holdMs === "number") this.cfgHoldMs = frame.holdMs;
+      if (typeof frame.idleEndMs === "number") this.cfgIdleEndMs = frame.idleEndMs;
+      this.cfgLive = frame.live === true;
+      if (this.page && typeof this.page.onConfig === "function") {
+        this.page.onConfig({
+          deadZone: this.cfgDeadZone,
+          holdMs: this.cfgHoldMs,
+          idleEndMs: this.cfgIdleEndMs,
+          live: this.cfgLive,
+        });
+      }
       return;
     }
     if (frame.kind === "gsync") {
@@ -289,11 +309,26 @@ export default {
     if (!this.tiltOn) return;
 
     // 正常模式：实时手势识别
-    if (!this._live) this._live = gestureLib.createRecorder();
+    if (!this._live) {
+      this._live = gestureLib.createRecorder({
+        deadZone: this.cfgDeadZone,
+        holdMs: this.cfgHoldMs,
+        idleEndMs: this.cfgIdleEndMs,
+      });
+    }
     this._live.feed(x, y);
 
+    const hint = this._live.hint();
+    const path = this._live.path();
+
     if (this.page && typeof this.page.onTilt === "function") {
-      this.page.onTilt(this._live.hint(), this._live.path());
+      this.page.onTilt(hint, path);
+    }
+
+    // 诊断模式：把当前方向实时发给手机，让 App 上能看到
+    if (this.cfgLive && hint && hint !== this._lastLiveSent) {
+      this._lastLiveSent = hint;
+      this.send({ t: "tiltlive", dir: hint, path: path.join(",") });
     }
 
     // 静止足够久 -> 手势结束，尝试匹配
@@ -318,7 +353,11 @@ export default {
   /** 开始学习录制。 */
   startRecord() {
     this.recording = true;
-    this.recorder = gestureLib.createRecorder();
+    this.recorder = gestureLib.createRecorder({
+      deadZone: this.cfgDeadZone,
+      holdMs: this.cfgHoldMs,
+      idleEndMs: this.cfgIdleEndMs,
+    });
     this.recorder.start();
     this._subscribeSensor();
   },

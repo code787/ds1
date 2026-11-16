@@ -44,6 +44,13 @@ sealed interface Command {
     /** 手环报告当前体感开关状态。 */
     data class TiltState(val on: Boolean) : Command
 
+    /**
+     * 手环实时上报当前识别到的方向（诊断用）。
+     *
+     * 只在学习/调试时开启，正常使用不上报——每 20ms 一条会把蓝牙打满。
+     */
+    data class TiltLive(val dir: String, val path: String) : Command
+
     companion object {
         fun decode(raw: String): Command? = try {
             val o = JSONObject(raw)
@@ -63,6 +70,10 @@ sealed interface Command {
                 "gesture" -> GestureHit(o.optString("path"))
                 "syncreq" -> SyncRequest
                 "tilt" -> TiltState(o.optBoolean("on", false))
+                "tiltlive" -> TiltLive(
+                    dir = o.optString("dir"),
+                    path = o.optString("path"),
+                )
                 else -> null
             }
         } catch (t: Throwable) {
@@ -93,6 +104,22 @@ object StatusCodec {
             put("battery", battery)
             put("listening", listening)
             put("tilt", tiltOn)
+        }.toString().toByteArray(Charsets.UTF_8)
+
+    /** 手机 → 手环：下发手势识别配置（死区、时长等）。 */
+    fun encodeConfigSync(
+        deadZone: Int,
+        holdMs: Int,
+        idleEndMs: Int,
+        live: Boolean,
+    ): ByteArray =
+        JSONObject().apply {
+            put("v", 1)
+            put("kind", "cfg")
+            put("deadZone", deadZone)
+            put("holdMs", holdMs)
+            put("idleEndMs", idleEndMs)
+            put("live", live)
         }.toString().toByteArray(Charsets.UTF_8)
 
     /** 手机 → 手环：下发手势模板列表。 */

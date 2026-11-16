@@ -139,7 +139,9 @@ class MainActivity : Activity() {
             setOnClickListener {
                 try {
                     val panel = com.wristcontrol.app.gesture.GesturePanel(this@MainActivity)
+                    gesturePanel = panel
                     setContentView(panel.build())
+                    panel.onResume()
                 } catch (t: Throwable) {
                     statusText.text = "打开手势面板失败：${t.javaClass.simpleName}"
                 }
@@ -175,12 +177,28 @@ class MainActivity : Activity() {
         setContentView(scroll)
     }
 
+    private var gesturePanel: com.wristcontrol.app.gesture.GesturePanel? = null
+
     override fun onResume() {
         super.onResume()
         try {
             refreshStatus()
         } catch (t: Throwable) {
             Log.w(TAG, "刷新状态失败: ${t.javaClass.simpleName}")
+        }
+        try {
+            gesturePanel?.onResume()
+        } catch (t: Throwable) {
+            Log.w(TAG, "手势面板恢复失败: ${t.javaClass.simpleName}")
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        try {
+            gesturePanel?.onPause()
+        } catch (t: Throwable) {
+            Log.w(TAG, "手势面板暂停失败: ${t.javaClass.simpleName}")
         }
     }
 
