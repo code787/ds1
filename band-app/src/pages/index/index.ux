@@ -140,10 +140,9 @@ export default {
   },
 
   onSwipe(event) {
-    if (!this.linkOk) {
-      this.buzz();
-      return;
-    }
+    // 不检查 linkOk：触摸板和体感是两个独立功能，
+    // 体感出问题不该让触摸板也失效。
+    // 发送失败会由 _send 的回调显示出来。
     const direction = event && event.direction;
     let dx = 0;
     let dy = 0;
@@ -160,26 +159,19 @@ export default {
   },
 
   onTap() {
-    if (!this.linkOk) {
-      this.buzz();
-      return;
-    }
     this._lastSwipe = "";
     this._send({ t: "tap" });
   },
 
   onBack() {
-    if (!this.linkOk) return;
     this._send({ t: "back" });
   },
 
   onHome() {
-    if (!this.linkOk) return;
     this._send({ t: "home" });
   },
 
   onRecents() {
-    if (!this.linkOk) return;
     this._send({ t: "recents" });
   },
 
