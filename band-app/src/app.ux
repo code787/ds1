@@ -100,9 +100,11 @@ export default {
         data: cmd,
         success: () => { this._lastError = ""; if (onResult) onResult(true, ""); },
         fail: (res, code) => {
-          const msg = "fail code=" + (code === undefined ? "?" : code) + " msg=" + (res && res.data ? res.data : errText(res));
-          this._lastError = msg;
-          if (onResult) onResult(false, msg);
+          const raw = res && res.data !== undefined ? res.data : errText(res);
+          this._lastError = String(raw);
+          this._lastCode = String(code === undefined ? "?" : code);
+          this._lastCmd = cmd && cmd.t ? cmd.t : "";
+          if (onResult) onResult(false, this._lastError);
         },
       });
       return true;
@@ -124,6 +126,11 @@ export default {
   },
 
   lastError() { return this._lastError || ""; },
+
+  /** 完整失败详情，供诊断层显示。 */
+  lastDetail() {
+    return { cmd: this._lastCmd || "", code: this._lastCode || "", msg: this._lastError || "" };
+  },
   buzz() { /* 不用 vibrator */ },
 };
 

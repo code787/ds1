@@ -6,7 +6,17 @@
       <text class="battery" if="{{ batteryVisible }}">{{ batteryText }}</text>
     </div>
 
-    <div class="pad" onswipe="onSwipe" onclick="onTap">
+    <!-- 诊断层：显示完整错误信息，点任意处关闭 -->
+    <div class="diag" if="{{ diagOpen }}" onclick="closeDiag">
+      <text class="diag-title">发送诊断</text>
+      <text class="diag-line" if="{{ diagCmd }}">指令: {{ diagCmd }}</text>
+      <text class="diag-line" if="{{ diagCode }}">code: {{ diagCode }}</text>
+      <text class="diag-line" if="{{ diagMsg }}">msg: {{ diagMsg }}</text>
+      <text class="diag-line" if="{{ diagReady }}">链路: {{ diagReady }}</text>
+      <text class="diag-tip">点任意处关闭</text>
+    </div>
+
+    <div class="pad" onswipe="onSwipe" onclick="onTap" onlongpress="openDiag">
       <text class="pad-hint">{{ padHint }}</text>
       <text class="pad-error" if="{{ errorText }}">{{ errorText }}</text>
     </div>
@@ -31,6 +41,11 @@ export default {
     batteryText: "",
     padHint: "等待手机连接",
     errorText: "",
+    diagOpen: false,
+    diagCmd: "",
+    diagCode: "",
+    diagMsg: "",
+    diagReady: "",
   },
 
   onInit() {
@@ -137,6 +152,27 @@ export default {
     this._send({ t: "recents" });
   },
 
+  /** 长按触摸板：打开完整诊断层。 */
+  openDiag() {
+    this.diagOpen = true;
+    const app = this.$app.$def;
+    if (app && typeof app.lastDetail === "function") {
+      const d = app.lastDetail();
+      this.diagCmd = d.cmd || "";
+      this.diagCode = d.code || "";
+      this.diagMsg = d.msg || "";
+    }
+    if (app && typeof app.readyState === "function") {
+      app.readyState((status) => {
+        this.diagReady = status === 1 ? "已就绪" : "状态=" + status;
+      });
+    }
+  },
+
+  closeDiag() {
+    this.diagOpen = false;
+  },
+
   _send(cmd) {
     this._lastSendAt = Date.now();
     const app = this.$app.$def;
@@ -152,7 +188,9 @@ export default {
     app.send(cmd, (ok, err) => {
       const text = ok ? "已发送 " + name : "发送失败 " + name;
       if (this.padHint !== text) this.padHint = text;
-      if (this.errorText !== (err || "")) this.errorText = err || "";
+      // 小字只显示前 18 个字符，完整内容在诊断层
+      const short = (err || "").slice(0, 18);
+      if (this.errorText !== short) this.errorText = short;
     });
   },
 
@@ -206,6 +244,16 @@ export default {
 }
 .pad-hint { font-size: 17px; color: #666666; text-align: center; }
 .pad-error { font-size: 12px; color: #ff6666; text-align: center; margin-top: 4px; }
+.diag {
+  position: absolute;
+  left: 0; top: 0; right: 0; bottom: 0;
+  background-color: #000000;
+  flex-direction: column;
+  padding: 10px;
+}
+.diag-title { font-size: 18px; color: #00ff99; font-weight: bold; margin-bottom: 6px; }
+.diag-line { font-size: 13px; color: #ffffff; margin-bottom: 4px; }
+.diag-tip { font-size: 12px; color: #666666; margin-top: auto; text-align: center; }
 .keys { flex-direction: row; height: 62px; }
 .key {
   flex: 1;
