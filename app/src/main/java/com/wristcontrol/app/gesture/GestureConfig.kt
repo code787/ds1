@@ -26,12 +26,23 @@ data class GestureConfig(
 
     /** 是否在手机上实时显示识别到的方向（诊断用）。 */
     val showLive: Boolean = true,
+
+    /**
+     * 坐标系旋转偏移（度，-180~180）。
+     *
+     * 手环戴在手腕上时，屏幕是立着的、还带角度，加速度计的 x/y 轴
+     * 跟"用户以为的上下左右"对不上。这个值用来把坐标系转正。
+     *
+     * 典型情况：向右倾却识别成右上 → 说明整体偏了 45 度左右，调到 -45 试试。
+     */
+    val rotationOffset: Int = 0,
 ) {
     fun clamp(): GestureConfig = copy(
         deadZone = deadZone.coerceIn(4, 40),
         holdMs = holdMs.coerceIn(40, 500),
         idleEndMs = idleEndMs.coerceIn(200, 2000),
         tolerance = tolerance.coerceIn(0, 2),
+        rotationOffset = rotationOffset.coerceIn(-180, 180),
     )
 }
 
@@ -47,6 +58,7 @@ class GestureConfigStore(context: Context) {
         idleEndMs = prefs.getInt("idleEndMs", 600),
         tolerance = prefs.getInt("tolerance", 1),
         showLive = prefs.getBoolean("showLive", true),
+        rotationOffset = prefs.getInt("rotationOffset", 0),
     ).clamp()
 
     fun save(cfg: GestureConfig) {
@@ -57,6 +69,7 @@ class GestureConfigStore(context: Context) {
             .putInt("idleEndMs", c.idleEndMs)
             .putInt("tolerance", c.tolerance)
             .putBoolean("showLive", c.showLive)
+            .putInt("rotationOffset", c.rotationOffset)
             .apply()
     }
 }

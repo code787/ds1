@@ -283,7 +283,11 @@ export default {
   width: 100%;
   height: 100%;
   background-color: #000000;
-  padding: 6px;
+  /* 顶部留出系统状态栏的高度，否则第一行文字会被挡 */
+  padding-top: 34px;
+  padding-left: 6px;
+  padding-right: 6px;
+  padding-bottom: 6px;
 }
 .status {
   flex-direction: row;

@@ -30,6 +30,33 @@ class MainActivity : Activity() {
 
     private lateinit var statusText: TextView
 
+    /** 是否正停留在手势面板。返回键据此决定回主界面还是退出。 */
+    private var inGesturePanel = false
+
+    /**
+     * 返回主界面。
+     *
+     * 之前按返回直接 finish() 会退到桌面，用户要的是回 App 起始页。
+     */
+    fun showMainPage() {
+        gesturePanel = null
+        inGesturePanel = false
+        try {
+            buildUi()
+        } catch (t: Throwable) {
+            Log.w(TAG, "重建主界面失败: ${t.javaClass.simpleName}")
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onBackPressed() {
+        if (inGesturePanel) {
+            showMainPage()
+        } else {
+            super.onBackPressed()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -140,6 +167,7 @@ class MainActivity : Activity() {
                 try {
                     val panel = com.wristcontrol.app.gesture.GesturePanel(this@MainActivity)
                     gesturePanel = panel
+                    inGesturePanel = true
                     setContentView(panel.build())
                     panel.onResume()
                 } catch (t: Throwable) {

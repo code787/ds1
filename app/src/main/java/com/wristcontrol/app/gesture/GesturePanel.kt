@@ -25,6 +25,8 @@ class GesturePanel(private val activity: Activity) {
 
     private val store = GestureStore(activity)
     private val cfgStore = GestureConfigStore(activity)
+    private var rotationValue: TextView? = null
+    private val cfgStore = GestureConfigStore(activity)
     private var cfg = cfgStore.load()
 
     private val root = LinearLayout(activity).apply {
@@ -93,6 +95,37 @@ class GesturePanel(private val activity: Activity) {
         }
 
         // ---- 手势列表 ----
+        // ---- 坐标系旋转 ----
+        root.addView(TextView(activity).apply {
+            text = "坐标系旋转偏移"
+            textSize = 16f
+            setPadding(0, 24, 0, 4)
+        })
+        root.addView(TextView(activity).apply {
+            text = "向右倾却识别成右上/右下时调这个。\n每 45 度对应一个方向，整圈 360。"
+            textSize = 13f
+        })
+        rotationValue = TextView(activity).apply {
+            text = "当前：" + cfgStore.load().rotationOffset + "°"
+            textSize = 15f
+            setPadding(0, 8, 0, 0)
+        }
+        root.addView(rotationValue)
+        root.addView(android.widget.SeekBar(activity).apply {
+            max = 360
+            progress = (cfgStore.load().rotationOffset + 180)
+            setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: android.widget.SeekBar?, p: Int, fromUser: Boolean) {
+                    if (!fromUser) return
+                    val value = p - 180
+                    rotationValue?.text = "当前：" + value + "°"
+                    saveCfg(cfgStore.load().copy(rotationOffset = value))
+                }
+                override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {}
+            })
+        })
+
         root.addView(Button(activity).apply {
             text = "＋ 学习新手势"
             setOnClickListener { startLearn() }
@@ -179,6 +212,16 @@ class GesturePanel(private val activity: Activity) {
     private fun applyCfg() {
         cfgStore.save(cfg)
         com.wristcontrol.app.transport.ServiceRef.current?.pushConfig()
+    }
+
+    /** 保存配置并立即下发手环。 */
+    private fun saveCfg(c: GestureConfig) {
+        cfgStore.save(c)
+        try {
+            com.wristcontrol.app.transport.ServiceRef.current?.pushConfig()
+        } catch (t: Throwable) {
+            // 服务没起时忽略，下次启动会重新下发
+        }
     }
 
     private fun refresh() {

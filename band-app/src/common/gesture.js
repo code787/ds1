@@ -25,11 +25,29 @@ var IDLE_END_MS = 600;
  * 把倾角映射到八方向。
  * x 向右为正，y 向上为正；死区内返回 null。
  */
-function toDir(x, y, deadZone) {
-  var dz = (typeof deadZone === "number") ? deadZone : DEAD_ZONE;
+function toDir(x, y, rotation) {
+  var mag = Math.sqrt(x * x + y * y);
+  if (mag < DEAD_ZONE) return null;
+  var angle = Math.atan2(y, x) * 180 / Math.PI;
+  // 坐标系旋转：手环戴在手腕上时 x/y 轴与用户以为的上下左右对不上
+  angle = angle - (rotation || 0);
+  var n = ((angle % 360) + 360) % 360;
+  if (n < 22.5 || n >= 337.5) return "E";
+  if (n < 67.5) return "NE";
+  if (n < 112.5) return "N";
+  if (n < 157.5) return "NW";
+  if (n < 202.5) return "W";
+  if (n < 247.5) return "SW";
+  if (n < 292.5) return "S";
+  return "SE";
+}
+
+/** 内部用：同时指定死区与旋转。 */
+function toDirWithZone(x, y, dz, rotation) {
   var mag = Math.sqrt(x * x + y * y);
   if (mag < dz) return null;
   var angle = Math.atan2(y, x) * 180 / Math.PI;
+  angle = angle - (rotation || 0);
   var n = ((angle % 360) + 360) % 360;
   if (n < 22.5 || n >= 337.5) return "E";
   if (n < 67.5) return "NE";
@@ -55,6 +73,8 @@ function createRecorder(opts) {
   var deadZone = typeof o.deadZone === "number" ? o.deadZone : DEAD_ZONE;
   var holdMs = typeof o.holdMs === "number" ? o.holdMs : HOLD_MS;
   var idleEndMs = typeof o.idleEndMs === "number" ? o.idleEndMs : IDLE_END_MS;
+  var rotation = typeof o.rotationOffset === "number" ? o.rotationOffset : 0;
+  var dz = deadZone;
   var steps = [];
   var current = null;
   var currentSince = 0;
@@ -70,7 +90,7 @@ function createRecorder(opts) {
 
     feed: function (x, y) {
       var now = Date.now();
-      var dir = toDir(x, y, deadZone);
+      var dir = toDirWithZone(x, y, dz, rotation);
 
       if (dir === null) {
         // 回到死区：方向断开
@@ -151,6 +171,12 @@ function bestMatch(actual, templates, maxDistance) {
 
 module.exports = {
   DEAD_ZONE: DEAD_ZONE,
+  setConfig: function (c) {
+    if (!c) return;
+    if (c.deadZone !== undefined) DEAD_ZONE = c.deadZone;
+    if (c.holdMs !== undefined) HOLD_MS = c.holdMs;
+    if (c.idleEndMs !== undefined) IDLE_END_MS = c.idleEndMs;
+  },
   INTERVAL: INTERVAL,
   HOLD_MS: HOLD_MS,
   IDLE_END_MS: IDLE_END_MS,

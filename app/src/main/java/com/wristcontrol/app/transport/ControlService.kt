@@ -240,6 +240,7 @@ class ControlService : Service() {
                 holdMs = c.holdMs,
                 idleEndMs = c.idleEndMs,
                 live = c.showLive,
+                rotationOffset = c.rotationOffset,
             ),
         )
     }

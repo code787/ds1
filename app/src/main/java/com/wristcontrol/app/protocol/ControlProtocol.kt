@@ -112,6 +112,7 @@ object StatusCodec {
         holdMs: Int,
         idleEndMs: Int,
         live: Boolean,
+        rotationOffset: Int = 0,
     ): ByteArray =
         JSONObject().apply {
             put("v", 1)
@@ -120,6 +121,7 @@ object StatusCodec {
             put("holdMs", holdMs)
             put("idleEndMs", idleEndMs)
             put("live", live)
+            put("rotationOffset", rotationOffset)
         }.toString().toByteArray(Charsets.UTF_8)
 
     /** 手机 → 手环：下发手势模板列表。 */

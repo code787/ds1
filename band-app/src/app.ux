@@ -23,6 +23,15 @@ export default {
   listening: false,
   page: null,
 
+  // ---- 体感配置（由手机下发） ----
+  cfg: {
+    deadZone: 12,
+    holdMs: 120,
+    idleEndMs: 600,
+    rotationOffset: 0,
+    live: true,
+  },
+
   // ---- 体感状态 ----
   tiltOn: false,          // 开关
   cfgDeadZone: 12,        // 死区角度（度），由手机下发
@@ -128,6 +137,20 @@ export default {
           idleEndMs: this.cfgIdleEndMs,
           live: this.cfgLive,
         });
+      }
+      return;
+    }
+    if (frame.kind === "cfg") {
+      if (typeof frame.deadZone === "number") this.cfg.deadZone = frame.deadZone;
+      if (typeof frame.holdMs === "number") this.cfg.holdMs = frame.holdMs;
+      if (typeof frame.idleEndMs === "number") this.cfg.idleEndMs = frame.idleEndMs;
+      if (typeof frame.rotationOffset === "number") this.cfg.rotationOffset = frame.rotationOffset;
+      if (typeof frame.live === "boolean") this.cfg.live = frame.live;
+      // 配置变了要重建录制器，否则旧参数还在用
+      this._live = null;
+      this.recorder = null;
+      if (this.page && typeof this.page.onConfig === "function") {
+        this.page.onConfig(this.cfg);
       }
       return;
     }
@@ -344,11 +367,7 @@ export default {
 
     // 正常模式：实时手势识别
     if (!this._live) {
-      this._live = gestureLib.createRecorder({
-        deadZone: this.cfgDeadZone,
-        holdMs: this.cfgHoldMs,
-        idleEndMs: this.cfgIdleEndMs,
-      });
+      this._live = gestureLib.createRecorder(this.cfg);
     }
     this._live.feed(x, y);
 
@@ -389,11 +408,7 @@ export default {
   /** 开始学习录制。 */
   startRecord() {
     this.recording = true;
-    this.recorder = gestureLib.createRecorder({
-      deadZone: this.cfgDeadZone,
-      holdMs: this.cfgHoldMs,
-      idleEndMs: this.cfgIdleEndMs,
-    });
+    this.recorder = gestureLib.createRecorder(this.cfg);
     this.recorder.start();
     this._subscribeSensor();
   },
