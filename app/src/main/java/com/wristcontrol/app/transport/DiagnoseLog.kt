@@ -26,9 +26,31 @@ object DiagnoseLog {
 
     private val fmt = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.US)
 
+    /** 内存里保留最近 100 条，供界面实时显示。 */
+    private val recent = ArrayDeque<String>()
+    private const val RECENT_MAX = 100
+
+    /** 界面注册这个回调就能实时收到每条日志。 */
+    @Volatile
+    var listener: ((String) -> Unit)? = null
+
+    /** 取最近 N 条（新→旧）。 */
+    @Synchronized
+    fun recentLines(n: Int = 30): List<String> =
+        recent.toList().takeLast(n).reversed()
+
     @Synchronized
     fun append(context: Context, message: String) {
         val line = "${fmt.format(Date())}  $message"
+
+        // 内存缓冲（界面用）
+        recent.addLast(line)
+        while (recent.size > RECENT_MAX) recent.removeFirst()
+        try {
+            listener?.invoke(line)
+        } catch (t: Throwable) {
+            // 回调异常不能影响日志本身
+        }
         Log.i(TAG, message)
         try {
             val dir = context.getExternalFilesDir(null) ?: context.filesDir

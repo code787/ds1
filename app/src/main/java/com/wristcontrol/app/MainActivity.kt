@@ -29,6 +29,7 @@ class MainActivity : Activity() {
     }
 
     private lateinit var statusText: TextView
+    private var liveLog: TextView? = null
 
     /** 是否正停留在手势面板。返回键据此决定回主界面还是退出。 */
     private var inGesturePanel = false
@@ -196,6 +197,21 @@ class MainActivity : Activity() {
             }
         })
 
+        // 实时消息日志
+        root.addView(TextView(this).apply {
+            text = "实时消息日志"
+            textSize = 16f
+            setPadding(0, 32, 0, 8)
+        })
+        liveLog = TextView(this).apply {
+            textSize = 11f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setTextIsSelectable(true)
+            setPadding(0, 0, 0, 16)
+            text = "（等待消息…）"
+        }
+        root.addView(liveLog)
+
         statusText = TextView(this).apply {
             textSize = 14f
             setPadding(0, 40, 0, 0)
@@ -209,6 +225,21 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // 注册日志监听，实时刷新界面
+        try {
+            com.wristcontrol.app.transport.DiagnoseLog.listener = { line ->
+                runOnUiThread {
+                    val box = liveLog ?: return@runOnUiThread
+                    val lines = com.wristcontrol.app.transport.DiagnoseLog.recentLines(25)
+                    box.text = lines.joinToString("\n")
+                }
+            }
+            // 立即显示已有的
+            liveLog?.text = com.wristcontrol.app.transport.DiagnoseLog.recentLines(25)
+                .joinToString("\n").ifEmpty { "（还没有日志）" }
+        } catch (t: Throwable) {
+            // 日志显示失败不影响主流程
+        }
         try {
             refreshStatus()
         } catch (t: Throwable) {
@@ -223,6 +254,7 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        com.wristcontrol.app.transport.DiagnoseLog.listener = null
         try {
             gesturePanel?.onPause()
         } catch (t: Throwable) {
