@@ -1,6 +1,7 @@
 package com.wristcontrol.app.gesture
 
 import kotlin.math.atan2
+import kotlin.math.asin
 import kotlin.math.hypot
 import kotlin.math.sqrt
 
@@ -92,6 +93,9 @@ class GestureEngine(private var config: GestureConfig = GestureConfig()) {
     var lastY: Float = 0f
     @Volatile
     var lastAngle: Float = 0f
+
+    /** 相对水平面的倾角（度）。0=平放，90=竖直。 */
+    var lastTilt: Float = 0f
     @Volatile
     var lastDir: String = ""
 
@@ -141,7 +145,7 @@ class GestureEngine(private var config: GestureConfig = GestureConfig()) {
      *
      * @return 若这一帧让手势结束，返回方向序列；否则 null
      */
-    fun feed(ax: Float, ay: Float): List<String>? {
+    fun feed(ax: Float, ay: Float, az: Float = 0f): List<String>? {
         // 1. 卡尔曼滤波
         fx = kx.update(ax.toDouble())
         fy = ky.update(ay.toDouble())
@@ -151,14 +155,26 @@ class GestureEngine(private var config: GestureConfig = GestureConfig()) {
         lastX = x.toFloat()
         lastY = y.toFloat()
 
-        val mag = hypot(x, y)
+        // 倾角计算：加速度计读数是重力在三个轴上的投影（g 单位）。
+        // 只用 hypot(x,y) 判断倾斜是错的——那最大才 1.4，
+        // 而 deadZone 是角度（18 度），永远小于它，方向永远 null。
+        //
+        // 正确做法：用重力向量算「相对水平面的倾角」
+        //   tiltFrac = hypot(x,y) / hypot(x,y,z)   （0=平放，1=竖直）
+        //   tiltDeg  = asin(tiltFrac) 转角度
+        // 这样 deadZone 才是真正的「倾斜多少度才算动」。
+        val gTotal = hypot(hypot(x, y), az.toDouble())
+        val tiltFrac = if (gTotal > 0.01) hypot(x, y) / gTotal else 0.0
+        val tiltDeg = Math.toDegrees(asin(tiltFrac.coerceIn(0.0, 1.0)))
+
         val angle = ((Math.toDegrees(atan2(y, x)) + config.rotationOffset) % 360 + 360) % 360
         lastAngle = angle.toFloat()
+        lastTilt = tiltDeg.toFloat()
 
         val now = System.currentTimeMillis()
 
-        // 2. 死区判定
-        val dir = if (mag < config.deadZone) null else when {
+        // 2. 死区判定（单位：度）
+        val dir = if (tiltDeg < config.deadZone) null else when {
             angle < 45 || angle >= 315 -> "E"
             angle < 135 -> "N"
             angle < 225 -> "W"

@@ -169,7 +169,7 @@ class ControlService : Service() {
             tiltCount++
 
             // 界面要读的数据：卡尔曼滤波后的值、角度、方向
-            val result = engine.feed(command.x, command.y)
+            val result = engine.feed(command.x, command.y, command.z)
 
             lastTilt = Command.TiltLive(
                 dir = engine.lastDir,
@@ -177,7 +177,7 @@ class ControlService : Service() {
                 ax = engine.lastX,
                 ay = engine.lastY,
                 az = command.z,
-                angle = engine.lastAngle,
+                angle = engine.lastTilt,   // 用相对水平面的倾角，不是方位角
             )
             lastLiveDir = engine.lastDir
             lastLivePath = engine.currentPath().joinToString(",")
