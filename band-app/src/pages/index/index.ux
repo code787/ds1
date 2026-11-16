@@ -117,6 +117,11 @@ export default {
       if (this.batteryText !== batteryText) this.batteryText = batteryText;
     }
 
+    // 订阅失败时直接显示原因，别让用户以为"开关自己关了"
+    if (status.sensorError) {
+      const e = "传感器: " + status.sensorError;
+      if (this.errorText !== e) this.errorText = e;
+    }
     const padHint = linkOk && listening ? "滑动 / 点击" : "等待手机连接";
     if (this.padHint !== padHint) this.padHint = padHint;
   },

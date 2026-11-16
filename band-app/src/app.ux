@@ -163,6 +163,7 @@ export default {
         battery: this.battery,
         listening: this.listening,
         tiltOn: this.tiltOn,
+        sensorError: this.sensorSubscribed ? "" : (this._lastError || ""),
       });
     }
   },
@@ -310,15 +311,19 @@ export default {
         interval: gestureLib.INTERVAL,
         callback: (ret) => this._onAccel(ret),
         fail: (msg, code) => {
-          this._lastError = "传感器订阅失败 code=" + code;
-          this.tiltOn = false;
+          // 订阅失败**不改变开关状态**——开关是用户的意图，不是订阅结果。
+          // 之前这里把 tiltOn 置 false，看起来像"开关自己关了"，
+          // 实际是加速度计订阅失败。把失败原因显示出来，别偷偷关开关。
+          this._lastError = "传感器订阅失败 code=" + code + " msg=" + (msg || "");
+          this.sensorSubscribed = false;
           this._push();
         },
       });
       this.sensorSubscribed = true;
     } catch (e) {
+      // 同上：订阅抛异常也不动开关，只记录原因
       this._lastError = "无法订阅传感器: " + errText(e);
-      this.tiltOn = false;
+      this.sensorSubscribed = false;
       this._push();
     }
   },
