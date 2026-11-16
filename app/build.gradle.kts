@@ -1,7 +1,21 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
+
+// 版本号唯一来源：根目录 version.properties
+// 允许 CI 用 -PversionCode=xxx 覆盖（构建号自增）
+val versionProps = Properties().apply {
+    val f = rootProject.file("version.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+
+val appVersionCode: Int = (findProperty("versionCode") as String?)?.toIntOrNull()
+    ?: versionProps.getProperty("versionCode", "1").toInt()
+val appVersionName: String = (findProperty("versionName") as String?)
+    ?: versionProps.getProperty("versionName", "0.1.0")
 
 android {
     namespace = "com.wristcontrol.app"
@@ -11,8 +25,8 @@ android {
         applicationId = "com.wristcontrol.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
     }
 
     signingConfigs {

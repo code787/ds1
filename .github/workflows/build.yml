@@ -52,14 +52,31 @@ jobs:
           sha256sum app/libs/xms-wearable-lib_1.4_release.aar
           echo "9c40fd1c5409bb948523d503af71e2978ae522c35636afe7d64f474c0f6bc195  app/libs/xms-wearable-lib_1.4_release.aar" | sha256sum -c -
 
+      - name: 计算版本号
+        id: ver
+        run: |
+          BASE=$(grep '^versionCode=' version.properties | cut -d= -f2 | tr -d ' ')
+          NAME=$(grep '^versionName=' version.properties | cut -d= -f2 | tr -d ' ')
+          # 用构建号偏移，保证每次 CI 都递增，且永远大于本地手写值
+          CODE=$((BASE + GITHUB_RUN_NUMBER))
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "本次构建: versionCode=$CODE versionName=$NAME"
+
       - name: 编译手机端 APK
-        run: gradle :app:assembleDebug --no-daemon
+        run: |
+          gradle :app:assembleDebug --no-daemon \
+            -PversionCode=${{ steps.ver.outputs.code }} \
+            -PversionName=${{ steps.ver.outputs.name }}
 
       - name: 跑单测
         run: cd band-app && npm install && npm test
 
       - name: 编译手环端 RPK
-        run: node scripts/build-rpk.js
+        run: |
+          node scripts/build-rpk.js \
+            --code ${{ steps.ver.outputs.code }} \
+            --name ${{ steps.ver.outputs.name }}
 
       - name: 核对 APK 与 RPK 证书一致
         run: |
@@ -79,6 +96,19 @@ jobs:
           PY
           echo
           echo "两边指纹必须来自同一把证书，否则手环收不到消息。"
+
+      - name: 核对两端版本号一致
+        run: |
+          APK_VER=$(grep -o 'versionName=[0-9.]*' app/build/outputs/apk/debug/output-metadata.json 2>/dev/null | head -1 || true)
+          RPK_VER=$(python3 -c "import json;print(json.load(open('band-app/src/manifest.json'))['versionCode'])")
+          echo "RPK versionCode=$RPK_VER"
+          echo "APK metadata: $APK_VER"
+          echo "期望 versionCode=${{ steps.ver.outputs.code }}"
+          if [ "$RPK_VER" != "${{ steps.ver.outputs.code }}" ]; then
+            echo "::error::RPK versionCode 与预期不一致"
+            exit 1
+          fi
+          echo "✓ 版本号一致"
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
