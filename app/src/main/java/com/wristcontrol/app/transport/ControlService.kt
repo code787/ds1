@@ -158,6 +158,7 @@ class ControlService : Service() {
             lastLiveDir = command.dir
             lastLivePath = command.path
             lastTilt = command
+            tiltCount++
             // 加速度数值变化很快，日志里只记方向，避免刷屏
             DiagnoseLog.append(this, "实时方向: dir=${command.dir} path=${command.path}")
             liveListener?.invoke(command.dir, command.path)
@@ -165,6 +166,7 @@ class ControlService : Service() {
         }
         if (command is Command.TiltState) {
             tiltOn = command.on
+            tiltEnabled = command.on
             DiagnoseLog.append(this, "体感开关: ${if (command.on) "开" else "关"}")
             pushStatus()
             return
@@ -221,6 +223,14 @@ class ControlService : Service() {
      */
     @Volatile
     var lastTilt: com.wristcontrol.app.protocol.Command.TiltLive? = null
+
+    /** 收到多少条实时数据。用来区分「手环没发」和「发了但没显示」。 */
+    @Volatile
+    var tiltCount: Int = 0
+
+    /** 手环当前体感开关状态。 */
+    @Volatile
+    var tiltEnabled: Boolean = false
         private set
 
     /** 体感模式是否开启（由手环同步过来）。 */

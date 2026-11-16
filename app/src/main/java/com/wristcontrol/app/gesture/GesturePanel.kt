@@ -186,15 +186,21 @@ class GesturePanel(private val activity: Activity) {
 
         // 传感器原始数据
         val t = svc.lastTilt
+        val count = svc.tiltCount
+        val on = svc.tiltEnabled
         val text = if (t == null) {
-            "等待手环上报…\n（需打开手环上的体感开关）"
+            "还没收到任何数据\n" +
+                "体感开关: " + (if (on) "开" else "关") + "\n" +
+                "累计收到: " + count + " 条\n" +
+                "（开关关了手环不会采样）"
         } else {
             val fmt = java.util.Locale.US
             "ax  %10.4f\n".format(fmt, t.ax) +
                 "ay  %10.4f\n".format(fmt, t.ay) +
                 "az  %10.4f\n".format(fmt, t.az) +
                 "角度 %8.2f°\n".format(fmt, t.angle) +
-                "方向 %s".format(t.dir)
+                "方向 %s\n".format(t.dir) +
+                "累计 %d 条 · 开关 %s".format(count, if (on) "开" else "关")
         }
         if (sensorBox.text != text) sensorBox.text = text
     }
