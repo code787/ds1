@@ -166,7 +166,22 @@ class ControlService : Service() {
         }
         if (command is Command.RawAccel) {
             // 识别全在手机端：手环只发原始值
+            tiltCount++
+
+            // 界面要读的数据：卡尔曼滤波后的值、角度、方向
             val result = engine.feed(command.x, command.y)
+
+            lastTilt = Command.TiltLive(
+                dir = engine.lastDir,
+                path = engine.currentPath().joinToString(","),
+                ax = engine.lastX,
+                ay = engine.lastY,
+                az = command.z,
+                angle = engine.lastAngle,
+            )
+            lastLiveDir = engine.lastDir
+            lastLivePath = engine.currentPath().joinToString(",")
+
             if (result != null && result.isNotEmpty()) {
                 DiagnoseLog.append(this, "识别出手势: ${result.joinToString(",")}")
                 handleGesture(result.joinToString(","))
