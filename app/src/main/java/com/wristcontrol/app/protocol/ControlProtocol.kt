@@ -128,6 +128,7 @@ object StatusCodec {
         idleEndMs: Int,
         live: Boolean,
         rotationOffset: Int = 0,
+        tolerance: Int = 1,
     ): ByteArray =
         JSONObject().apply {
             put("v", 1)
@@ -137,6 +138,8 @@ object StatusCodec {
             put("idleEndMs", idleEndMs)
             put("live", live)
             put("rotationOffset", rotationOffset)
+            // 容错距离也必须下发，否则界面上的滑杆是摆设
+            put("tolerance", tolerance)
         }.toString().toByteArray(Charsets.UTF_8)
 
     /** 手机 → 手环：下发手势模板列表。 */

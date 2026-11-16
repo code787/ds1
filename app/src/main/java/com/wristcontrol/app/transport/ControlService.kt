@@ -263,6 +263,7 @@ class ControlService : Service() {
                 idleEndMs = c.idleEndMs,
                 live = c.showLive,
                 rotationOffset = c.rotationOffset,
+                tolerance = c.tolerance,
             ),
         )
     }

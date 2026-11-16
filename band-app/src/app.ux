@@ -31,15 +31,13 @@ export default {
     // 手环横向佩戴：屏幕长边水平，加速度计 x/y 轴相对"用户以为的上下左右"
     // 整体偏了 90 度。默认 90，用户可以在 App 里微调。
     rotationOffset: 90,
+    // 匹配容错：0=必须完全一致，1=允许差一个方向，2=更宽松
+    tolerance: 1,
     live: true,
   },
 
   // ---- 体感状态 ----
   tiltOn: false,          // 开关
-  cfgDeadZone: 12,        // 死区角度（度），由手机下发
-  cfgHoldMs: 120,         // 方向保持时长
-  cfgIdleEndMs: 600,      // 静止判定
-  cfgLive: true,          // 是否实时上报方向（诊断）
   recording: false,       // 是否在学习录制
   recorder: null,         // 当前录制器
   sensorSubscribed: false,
@@ -123,6 +121,11 @@ export default {
       this.onLink = frame.link === "connected" ? "connected" : "disconnected";
       this.battery = typeof frame.battery === "number" ? frame.battery : -1;
       this.listening = frame.listening === true;
+      // 体感开关以手机端为准：手机重启后手环要跟上，不能各说各话
+      if (typeof frame.tilt === "boolean" && frame.tilt !== this.tiltOn) {
+        this.tiltOn = frame.tilt;
+        if (frame.tilt) this._subscribeSensor(); else this._unsubscribeSensor();
+      }
       this._push();
       return;
     }
@@ -131,6 +134,7 @@ export default {
       if (typeof frame.holdMs === "number") this.cfg.holdMs = frame.holdMs;
       if (typeof frame.idleEndMs === "number") this.cfg.idleEndMs = frame.idleEndMs;
       if (typeof frame.rotationOffset === "number") this.cfg.rotationOffset = frame.rotationOffset;
+        if (typeof frame.tolerance === "number") this.cfg.tolerance = frame.tolerance;
       if (typeof frame.live === "boolean") this.cfg.live = frame.live;
       // 配置变了要重建录制器，否则旧参数还在用
       this._live = null;
@@ -380,7 +384,7 @@ export default {
     // 现在每次采样都发原值，手机上能看到完整数据。
     //
     // 代价是蓝牙流量大（20ms 一条 ≈ 50 条/秒），只在诊断开关打开时发。
-    if (this.cfgLive) {
+    if (this.cfg.live) {
       const angle = Math.atan2(y, x) * 180 / Math.PI;
       this.send({
         t: "tiltlive",
