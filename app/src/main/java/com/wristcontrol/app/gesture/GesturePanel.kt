@@ -42,6 +42,13 @@ class GesturePanel(private val activity: Activity) {
         setPadding(0, 0, 0, 16)
     }
 
+    /** 传感器原始数据（等宽字体，数值对齐才好读）。 */
+    private val sensorBox = TextView(activity).apply {
+        textSize = 13f
+        typeface = android.graphics.Typeface.MONOSPACE
+        setPadding(0, 8, 0, 16)
+    }
+
     private val handler = Handler(Looper.getMainLooper())
     private val poller = object : Runnable {
         override fun run() {
@@ -68,6 +75,18 @@ class GesturePanel(private val activity: Activity) {
         })
         root.addView(liveBox)
         root.addView(liveSub)
+
+        // ---- 传感器数据 ----
+        root.addView(TextView(activity).apply {
+            text = "传感器数据"
+            textSize = 16f
+            setPadding(0, 8, 0, 0)
+        })
+        root.addView(TextView(activity).apply {
+            text = "手环只有加速度计，没有陀螺仪——这里没有角速度。"
+            textSize = 12f
+        })
+        root.addView(sensorBox)
 
         // ---- 阈值调节 ----
         root.addView(TextView(activity).apply {
