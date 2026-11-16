@@ -142,6 +142,45 @@ export default {
     }
   },
 
+  /**
+   * 等链路可用再发送。
+   *
+   * 官方 onShow 里先 getApkStatusConnecting()：建连接 + 查 getApkStatus()。
+   * 这个状态决定能不能发——不看它直接 send 就会 not connected。
+   * apkStatus 是同步返回值，这里轮询等它变成可用状态。
+   */
+  waitReady(onResult) {
+    const MAX_WAIT = 3000;
+    const STEP = 200;
+    let waited = 0;
+    const self = this;
+    function tick() {
+      self._rebuild();
+      let status = -1;
+      try {
+        status = self._connect && typeof self._connect.getApkStatus === "function"
+          ? self._connect.getApkStatus()
+          : -1;
+      } catch (e) {
+        status = -1;
+      }
+      self._apkStatus = status;
+
+      // 官方示例里 getApkStatus 可用时返回非负值；-1 表示还没连上
+      if (status !== undefined && status !== null && status >= 0) {
+        if (onResult) onResult(true, status);
+        return;
+      }
+      if (waited >= MAX_WAIT) {
+        if (onResult) onResult(false, status);
+        return;
+      }
+      waited += STEP;
+      setTimeout(tick, STEP);
+    }
+    tick();
+  },
+
   /** 官方提供的另一个状态接口：同步返回 apkStatus。 */
   apkStatus() {
     try {

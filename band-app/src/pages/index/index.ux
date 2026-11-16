@@ -200,13 +200,29 @@ export default {
     // 先显示"发送中"，回调到了再更新——手环端没有 adb，页面是唯一反馈
     if (this.padHint !== "发送中 " + name) this.padHint = "发送中 " + name;
 
-    app.send(cmd, (ok, err) => {
-      const text = ok ? "已发送 " + name : "发送失败 " + name;
-      if (this.padHint !== text) this.padHint = text;
-      // 小字只显示前 18 个字符，完整内容在诊断层
-      const short = (err || "").slice(0, 18);
-      if (this.errorText !== short) this.errorText = short;
-    });
+    const doSend = () => {
+      app.send(cmd, (ok, err) => {
+        const text = ok ? "已发送 " + name : "发送失败 " + name;
+        if (this.padHint !== text) this.padHint = text;
+        const short = (err || "").slice(0, 18);
+        if (this.errorText !== short) this.errorText = short;
+      });
+    };
+
+    // 官方流程：先确认 apkStatus 可用再发，否则必然 not connected
+    if (typeof app.waitReady === "function") {
+      app.waitReady((ready, status) => {
+        if (!ready) {
+          const text = "链路未就绪(" + status + ")";
+          if (this.padHint !== text) this.padHint = text;
+          this.errorText = "apkStatus=" + status;
+          return;
+        }
+        doSend();
+      });
+    } else {
+      doSend();
+    }
   },
 
   /** 查一下连接状态，显示在页面上。 */
