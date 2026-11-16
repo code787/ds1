@@ -282,33 +282,23 @@ export default {
   /**
    * 开/关体感模式。
    *
-   * 不能有 if (this.tiltOn === on) return 的提前返回——
-   * 状态卡住时（比如订阅失败但 tiltOn 已经是 true）再点就永远没反应。
-   * 每次调用都强制执行，幂等。
+   * **关闭时只停止发送，不调用 unsubscribeAccelerometer。**
+   *
+   * 之前关闭时调 unsubscribeAccelerometer()，手环直接重启——
+   * 这个接口在部分固件上会触发底层驱动崩溃。
+   * 传感器订阅本身开销很小，保持订阅、只是不再发数据，
+   * 用户看到的效果完全一样（没有数据了），但不会崩。
+   *
+   * 同理去掉所有提前返回：状态卡住时再点也要有反应。
    */
   setTilt(on) {
     this.tiltOn = on;
     if (on) {
       this._subscribeSensor();
-    } else {
-      // 关闭时无条件取消订阅，不看 sensorSubscribed 标志——
-      // 那个标志可能因为订阅失败而失真，导致退订被跳过。
-      this._forceUnsubscribe();
     }
+    // 关闭时什么都不做——_onAccel 里会检查 this.tiltOn，不再发送
     this.send({ t: "tilt", on: on });
     this._push();
-  },
-
-  /** 强制取消订阅，不依赖 sensorSubscribed 标志。 */
-  _forceUnsubscribe() {
-    try {
-      if (this._sensor && this._sensor.unsubscribeAccelerometer) {
-        this._sensor.unsubscribeAccelerometer();
-      }
-    } catch (e) {
-      // 取消订阅失败不影响关闭
-    }
-    this.sensorSubscribed = false;
   },
 
   _subscribeSensor() {
@@ -343,13 +333,14 @@ export default {
     }
   },
 
+  /**
+   * 取消订阅传感器。
+   *
+   * **不调用 unsubscribeAccelerometer**——那个接口在部分固件上
+   * 会触发底层驱动崩溃，手环直接重启（实测过）。
+   * 只标记状态，_onAccel 里靠 tiltOn 判断是否发送。
+   */
   _unsubscribeSensor() {
-    if (!this.sensorSubscribed) return;
-    try {
-      if (this._sensor) this._sensor.unsubscribeAccelerometer();
-    } catch (e) {
-      // 取消订阅失败不影响关闭
-    }
     this.sensorSubscribed = false;
   },
 
