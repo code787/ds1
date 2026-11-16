@@ -341,72 +341,28 @@ export default {
   /**
    * 加速度采样回调。
    *
-   * 手环屏幕朝上时：x 左右、y 上下、z 垂直屏幕。
-   * 只用 x/y 算倾角；z 作为"是否戴在手上"的参考不参与识别。
+   * **手环只做一件事：把原始值发出去。**
+   * 滤波、方向判断、手势识别全部在手机端做。
+   *
+   * 为什么不在手环算：
+   * - 改算法/调参数要重装 RPK，手机上改立即生效
+   * - 手环算完只发结果，出问题看不到中间过程
+   * - 手环算力弱，卡尔曼跑在手机上更从容
+   *
+   * 代价是蓝牙流量大（20ms 一条），所以只在体感开启时发。
    */
   _onAccel(ret) {
     if (!ret) return;
-    const x = ret.x || 0;
-    const y = ret.y || 0;
 
-    if (this.recording && this.recorder) {
-      // 学习模式：喂给录制器
-      this.recorder.feed(x, y);
-      if (this.page && typeof this.page.onRecord === "function") {
-        this.page.onRecord(this.recorder.path(), this.recorder.hint());
-      }
-      return;
-    }
-
-    if (!this.tiltOn) return;
-
-    // 正常模式：实时手势识别
-    if (!this._live) {
-      this._live = gestureLib.createRecorder(this.cfg);
-    }
-    this._live.feed(x, y);
-
-    const hint = this._live.hint();
-    const path = this._live.path();
-
-    if (this.page && typeof this.page.onTilt === "function") {
-      this.page.onTilt(hint, path, {
-        ax: Math.round(x * 10) / 10,
-        ay: Math.round(y * 10) / 10,
-        az: Math.round((ret.z || 0) * 10) / 10,
-      });
-    }
-
-    // 诊断模式：把原始加速度发给手机。
-    //
-    // **不能加 hint 条件**：hint 只在倾斜超过死区时才有值，
-    // 平放不动时是 null，那样一条都不发，界面上永远空白。
-    // 现在只要体感开关开着就上报，静止时也能看到数值。
-    // 原始数据上报：**完全不过滤**。
-    //
-    // 之前有限流（200ms 一条）、有取整（两位小数）、还判断 hint。
-    // 这些都会让调试时看不到真实波形——手抖一下、快速摆动全被吃掉了。
-    // 现在每次采样都发原值，手机上能看到完整数据。
-    //
-    // 代价是蓝牙流量大（20ms 一条 ≈ 50 条/秒），只在诊断开关打开时发。
-    if (this.cfg.live) {
-      const angle = Math.atan2(y, x) * 180 / Math.PI;
+    // 学习模式和识别模式都要原始数据，统一发给手机
+    if (this.tiltOn || this.recording) {
       this.send({
-        t: "tiltlive",
-        dir: hint || "",
-        path: path.join(","),
-        ax: x,
-        ay: y,
-        az: ret.z === undefined ? 0 : ret.z,
-        angle: angle,
+        t: "raw",
+        x: ret.x,
+        y: ret.y,
+        z: ret.z === undefined ? 0 : ret.z,
+        rec: this.recording,
       });
-    }
-
-    // 静止足够久 -> 手势结束，尝试匹配
-    if (this._live.isIdle()) {
-      const path = this._live.finish();
-      this._live.start();
-      this._fireGesture(path);
     }
   },
 
@@ -423,21 +379,22 @@ export default {
     this.send({ t: "gesture", path: text });
   },
 
-  /** 开始学习录制。 */
+  /**
+   * 开始学习录制。
+   *
+   * 手环只标记 recording=true，让 _onAccel 继续发原始数据。
+   * 识别逻辑全在手机端，所以这里不需要录制器。
+   */
   startRecord() {
     this.recording = true;
-    this.recorder = gestureLib.createRecorder(this.cfg);
-    this.recorder.start();
     this._subscribeSensor();
   },
 
-  /** 结束学习，返回录到的方向序列。 */
+  /** 结束学习。识别结果由手机端自己算，这里只需停止标记。 */
   stopRecord() {
     this.recording = false;
-    const path = this.recorder ? this.recorder.finish() : [];
-    this.recorder = null;
     if (!this.tiltOn) this._unsubscribeSensor();
-    return path;
+    return [];
   },
 
   /** 接收手机下发的手势模板列表。 */

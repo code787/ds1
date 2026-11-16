@@ -45,6 +45,19 @@ sealed interface Command {
     data class TiltState(val on: Boolean) : Command
 
     /**
+     * 手环上报的**原始加速度**。
+     *
+     * 识别全在手机端做，手环只当传感器。
+     * 这样调算法、改参数只需换 APK，不用重装 RPK。
+     */
+    data class RawAccel(
+        val x: Float,
+        val y: Float,
+        val z: Float,
+        val recording: Boolean,
+    ) : Command
+
+    /**
      * 手环实时上报当前识别到的方向（诊断用）。
      *
      * 只在学习/调试时开启，正常使用不上报——每 20ms 一条会把蓝牙打满。
@@ -79,6 +92,12 @@ sealed interface Command {
                 "gesture" -> GestureHit(o.optString("path"))
                 "syncreq" -> SyncRequest
                 "tilt" -> TiltState(o.optBoolean("on", false))
+                "raw" -> RawAccel(
+                    x = o.optDouble("x", 0.0).toFloat(),
+                    y = o.optDouble("y", 0.0).toFloat(),
+                    z = o.optDouble("z", 0.0).toFloat(),
+                    recording = o.optBoolean("rec", false),
+                )
                 "tiltlive" -> TiltLive(
                     dir = o.optString("dir"),
                     path = o.optString("path"),

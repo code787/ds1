@@ -164,6 +164,15 @@ class ControlService : Service() {
             liveListener?.invoke(command.dir, command.path)
             return
         }
+        if (command is Command.RawAccel) {
+            // 识别全在手机端：手环只发原始值
+            val result = engine.feed(command.x, command.y)
+            if (result != null && result.isNotEmpty()) {
+                DiagnoseLog.append(this, "识别出手势: ${result.joinToString(",")}")
+                handleGesture(result.joinToString(","))
+            }
+            return
+        }
         if (command is Command.TiltState) {
             tiltOn = command.on
             tiltEnabled = command.on
@@ -240,6 +249,15 @@ class ControlService : Service() {
     private val gestureStore by lazy { com.wristcontrol.app.gesture.GestureStore(this) }
     private val configStore by lazy { com.wristcontrol.app.gesture.GestureConfigStore(this) }
 
+    /** 手势识别引擎，跑在手机端。 */
+    private val engine by lazy {
+        com.wristcontrol.app.gesture.GestureEngine(configStore.load())
+    }
+
+    /** 供界面读实时状态。 */
+    fun engineState(): com.wristcontrol.app.gesture.GestureEngine = engine
+    private val configStore by lazy { com.wristcontrol.app.gesture.GestureConfigStore(this) }
+
     /** 最近一次实时方向，供界面读取。 */
     @Volatile
     var lastLiveDir: String = ""
@@ -255,6 +273,7 @@ class ControlService : Service() {
     /** 把当前配置下发给手环。 */
     fun pushConfig() {
         val c = configStore.load()
+        engine.updateConfig(c)
         DiagnoseLog.append(this, "下发配置: 死区=${c.deadZone}° 保持=${c.holdMs}ms 静止=${c.idleEndMs}ms")
         transport?.sendRaw(
             com.wristcontrol.app.protocol.StatusCodec.encodeConfigSync(
