@@ -168,6 +168,13 @@ class ControlService : Service() {
             // 识别全在手机端：手环只发原始值
             tiltCount++
 
+            // 收到 raw 就说明传感器确实在工作——
+            // 不依赖手环那条可能丢失的 sensor 帧。
+            if (!sensorOk) {
+                sensorOk = true
+                sensorMsg = ""
+            }
+
             // 界面要读的数据：卡尔曼滤波后的值、角度、方向
             val result = engine.feed(command.x, command.y, command.z)
 

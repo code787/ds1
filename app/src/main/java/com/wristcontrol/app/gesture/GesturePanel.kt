@@ -193,7 +193,7 @@ class GesturePanel(private val activity: Activity) {
         val text = if (t == null) {
             "还没收到任何数据\n" +
                 "体感开关: " + (if (on) "开" else "关") + "\n" +
-                "传感器: " + (if (sOk) "已订阅" else "未订阅") + "\n" +
+                "传感器: " + (if (sOk) "工作中" else "未收到数据") + "\n" +
                 (if (sMsg.isNotEmpty()) "原因: " + sMsg + "\n" else "") +
                 "累计收到: " + count + " 条"
         } else {
