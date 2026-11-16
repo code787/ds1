@@ -93,8 +93,11 @@ export default {
         if (onResult) onResult(false, this._lastError);
         return false;
       }
+      // 官方示例 getData() 直接返回对象/字符串，**不自己 JSON.stringify**。
+      // 传字符串会被对端当非法格式（fail: invalid）。
+      // 这里直接传对象，让 SDK 自己序列化。
       conn.send({
-        data: JSON.stringify(cmd),
+        data: cmd,
         success: () => { this._lastError = ""; if (onResult) onResult(true, ""); },
         fail: (res, code) => {
           const msg = "fail code=" + (code === undefined ? "?" : code) + " msg=" + (res && res.data ? res.data : errText(res));
