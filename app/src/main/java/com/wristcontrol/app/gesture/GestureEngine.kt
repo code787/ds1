@@ -219,3 +219,84 @@ class GestureEngine(private var config: GestureConfig = GestureConfig()) {
         const val MAX_STEPS = 2
     }
 }
+
+/**
+ * 一条已学习的手势：方向序列 + 绑定的操作。
+ *
+ * 方向序列最多两个（如 "E,S"），两两组合已经够用，
+ * 更长的序列难画准、误识别率高。
+ */
+data class Gesture(
+    val id: String,
+    val name: String,
+    /** 方向序列，如 ["E", "S"]。 */
+    val path: List<String>,
+    /** 触发的指令类型，与 Command 的 t 字段对应。 */
+    val action: String,
+    /** 动作参数（比如音量 delta），无参数时为空串。 */
+    val arg: String = "",
+)
+
+object GestureCodec {
+    /** 序列化：["E","S"] -> "E,S" */
+    fun encodePath(path: List<String>): String = path.joinToString(",")
+
+    /** 反序列化：忽略空串与未知方向。 */
+    fun decodePath(text: String?): List<String> =
+        text.orEmpty()
+            .split(",")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && Dir.fromCode(it) != null }
+
+    /** 手势模板的传输格式（手机 → 手环）。 */
+    fun toJson(g: Gesture): String {
+        val p = encodePath(g.path)
+        return "{\"id\":\"" + g.id + "\",\"name\":\"" + g.name +
+            "\",\"path\":\"" + p + "\",\"action\":\"" + g.action +
+            "\",\"arg\":\"" + g.arg + "\"}"
+    }
+}
+
+/**
+ * 手势匹配器。
+ *
+ * 用编辑距离而不是完全相等——真人画手势不可能每次都一模一样，
+ * 允许漏一个方向或多一个抖动。
+ */
+object GestureMatcher {
+
+    /** 编辑距离（Levenshtein）。 */
+    fun distance(a: List<String>, b: List<String>): Int {
+        if (a.isEmpty()) return b.size
+        if (b.isEmpty()) return a.size
+        val prev = IntArray(b.size + 1) { it }
+        val cur = IntArray(b.size + 1)
+        for (i in 1..a.size) {
+            cur[0] = i
+            for (j in 1..b.size) {
+                val cost = if (a[i - 1] == b[j - 1]) 0 else 1
+                cur[j] = minOf(cur[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost)
+            }
+            cur.copyInto(prev)
+        }
+        return prev[b.size]
+    }
+
+    /**
+     * 在模板里找最匹配的一条。
+     * 返回 null 表示没有足够接近的——宁可不动，也不猜。
+     */
+    fun bestMatch(actual: List<String>, templates: List<Gesture>, maxDistance: Int = 1): Gesture? {
+        if (actual.isEmpty() || templates.isEmpty()) return null
+        var best: Gesture? = null
+        var bestDist = Int.MAX_VALUE
+        for (g in templates) {
+            val d = distance(actual, g.path)
+            if (d < bestDist) {
+                bestDist = d
+                best = g
+            }
+        }
+        return if (bestDist <= maxDistance) best else null
+    }
+}
