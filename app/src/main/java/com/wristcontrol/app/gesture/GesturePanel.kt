@@ -101,7 +101,7 @@ class GesturePanel(private val activity: Activity) {
             setPadding(0, 24, 0, 4)
         })
         root.addView(TextView(activity).apply {
-            text = "向右倾却识别成上/下时调这个。\n每 90 度对应一个方向，整圈 360。"
+            text = "横向佩戴（屏幕长边水平）默认 90°，竖着戴改 0°。\n如果上下的动作识别成左右，就是差 90 度。"
             textSize = 13f
         })
         rotationValue = TextView(activity).apply {

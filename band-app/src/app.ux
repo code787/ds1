@@ -28,7 +28,9 @@ export default {
     deadZone: 12,
     holdMs: 120,
     idleEndMs: 600,
-    rotationOffset: 0,
+    // 手环横向佩戴：屏幕长边水平，加速度计 x/y 轴相对"用户以为的上下左右"
+    // 整体偏了 90 度。默认 90，用户可以在 App 里微调。
+    rotationOffset: 90,
     live: true,
   },
 
@@ -122,22 +124,6 @@ export default {
       this.battery = typeof frame.battery === "number" ? frame.battery : -1;
       this.listening = frame.listening === true;
       this._push();
-      return;
-    }
-    if (frame.kind === "cfg") {
-      // 手机端下发的识别参数：死区、保持时长、静止判定、是否实时上报
-      if (typeof frame.deadZone === "number") this.cfgDeadZone = frame.deadZone;
-      if (typeof frame.holdMs === "number") this.cfgHoldMs = frame.holdMs;
-      if (typeof frame.idleEndMs === "number") this.cfgIdleEndMs = frame.idleEndMs;
-      this.cfgLive = frame.live === true;
-      if (this.page && typeof this.page.onConfig === "function") {
-        this.page.onConfig({
-          deadZone: this.cfgDeadZone,
-          holdMs: this.cfgHoldMs,
-          idleEndMs: this.cfgIdleEndMs,
-          live: this.cfgLive,
-        });
-      }
       return;
     }
     if (frame.kind === "cfg") {
