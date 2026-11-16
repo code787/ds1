@@ -8,6 +8,7 @@
 
     <div class="pad" onswipe="onSwipe" onclick="onTap">
       <text class="pad-hint">{{ padHint }}</text>
+      <text class="pad-error" if="{{ errorText }}">{{ errorText }}</text>
     </div>
 
     <div class="keys">
@@ -29,6 +30,7 @@ export default {
     batteryVisible: false,
     batteryText: "",
     padHint: "等待手机连接",
+    errorText: "",
   },
 
   onInit() {
@@ -138,12 +140,16 @@ export default {
   _send(cmd) {
     this._lastSendAt = Date.now();
     const app = this.$app.$def;
-    if (!app || typeof app.send !== "function") return;
-    const ok = app.send(cmd);
-    if (ok) {
-      this.padHint = "已发送…";
-      this.buzz();
+    if (!app || typeof app.send !== "function") {
+      this.errorText = "app 实例不可用";
+      return;
     }
+    const ok = app.send(cmd);
+    // 把发送结果直接显示在页面上——手环端没有 adb，这是唯一的现场反馈
+    const err = typeof app.lastError === "function" ? app.lastError() : "";
+    const text = ok ? "已发送 " + (cmd.t || "") : "发送失败: " + err;
+    if (this.padHint !== text) this.padHint = text;
+    if (this.errorText !== err) this.errorText = err;
   },
 
   buzz() {
@@ -185,6 +191,7 @@ export default {
   align-items: center;
 }
 .pad-hint { font-size: 17px; color: #666666; text-align: center; }
+.pad-error { font-size: 12px; color: #ff6666; text-align: center; margin-top: 4px; }
 .keys { flex-direction: row; height: 62px; }
 .key {
   flex: 1;

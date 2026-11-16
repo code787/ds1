@@ -22,6 +22,17 @@ const interconnect = require("@system.interconnect");
  *
  * event 的形状是 { data: ... }，data 可能是字符串也可能是对象，两种都要接。
  */
+/** 把异常转成可读文本，Vela 里 e.message 不一定存在。 */
+function errText(e) {
+  if (!e) return "unknown";
+  if (e.message) return String(e.message);
+  try {
+    return JSON.stringify(e);
+  } catch (x) {
+    return String(e);
+  }
+}
+
 export default {
   onLink: "unknown",
   battery: -1,
@@ -56,6 +67,8 @@ export default {
       connect.onopen = () => {
         this.onLink = "connected";
         this._push();
+        // 连上后立刻握手，告诉手机端「我在」
+        this.handshake();
       };
       connect.onclose = () => {
         this.onLink = "disconnected";
@@ -126,20 +139,54 @@ export default {
   /**
    * 发送一条指令。
    *
-   * 官方签名是 send({ data, success, fail })，不能直接传字符串。
-   * 返回 true 只表示已交给链路层，不代表手机执行成功。
+   * 反编译 ControlPhone（真机跑通）后发现它有两种 send 形式：
+   *   conn.send("control", payload)     ← 通道名 + 对象，业务指令用这个
+   *   conn.send({ data: {...} })        ← 对象形式，握手用这个
+   *
+   * 它还有握手：连上后先发 { tag: "__hs__" } 标记就绪，之后才发业务消息。
+   *
+   * 这里两种都试，成功一个就返回；把失败原因留给页面显示，便于诊断。
    */
   send(cmd) {
     const connect = this._connect;
-    if (!connect) return false;
-    try {
-      // 只传 { data }，不带 success/fail —— 闭源 ControlPhone 在真机上跑通的形态。
-      // 多传回调可能让参数校验失败并静默丢弃。
-      connect.send({ data: JSON.stringify(cmd) });
-      return true;
-    } catch (e) {
+    if (!connect) {
+      this._lastSendError = "connect 不存在";
       return false;
     }
+    const text = JSON.stringify(cmd);
+
+    try {
+      connect.send({ data: text });
+      this._lastSendError = "";
+      return true;
+    } catch (e1) {
+      this._lastSendError = "对象形式失败: " + errText(e1);
+    }
+
+    try {
+      connect.send("control", cmd);
+      this._lastSendError = "";
+      return true;
+    } catch (e2) {
+      this._lastSendError += " / 通道形式失败: " + errText(e2);
+      return false;
+    }
+  },
+
+  /** 握手：告诉手机「我准备好了」。失败不阻塞。 */
+  handshake() {
+    const connect = this._connect;
+    if (!connect) return;
+    try {
+      connect.send({ data: JSON.stringify({ tag: "__hs__", count: 1, app: "wristcontrol" }) });
+    } catch (e) {
+      // 握手失败不影响后续
+    }
+  },
+
+  /** 供页面显示最后一次发送错误。 */
+  lastError() {
+    return this._lastSendError || "";
   },
 
   /** 震动反馈占位。当前不启用（见文件头说明）。 */
