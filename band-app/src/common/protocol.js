@@ -44,6 +44,9 @@ function parseFrame(payload) {
         link: typeof o.link === "string" ? o.link : "unknown",
         battery: typeof o.battery === "number" ? o.battery : -1,
         listening: o.listening === true,
+        // 手机下发的体感开关状态。漏了这个，页面永远收不到，
+        // 开关按钮就一直是初始的「关」。
+        tiltOn: o.tiltOn === true,
       };
     }
     return null;

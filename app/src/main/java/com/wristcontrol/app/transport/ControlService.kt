@@ -113,7 +113,7 @@ class ControlService : Service() {
             transport = t
             t.start(
                 onCommand = ::handleCommandSafely,
-                onStatus = { pushStatus() },
+                onStatus = { pushStatus(force = true) },
                 onError = { reason ->
                     bridgeStatus = reason
                     updateNotification()
@@ -148,6 +148,7 @@ class ControlService : Service() {
         }
         if (command is Command.SyncRequest) {
             syncGestures()
+            pushStatus(force = true)   // 手环刚进来，立刻推一次
             return
         }
         if (command is Command.GestureHit) {
@@ -440,27 +441,33 @@ class ControlService : Service() {
         }
     }
 
-    private fun pushStatus() {
+    /**
+     * 推一帧状态给手环。
+     *
+     * @param force 跳过限流。手环重进页面、刚连上时必须立即推一次，
+     *              否则手环要等最多 5 秒才收到，期间显示「未连接手机」。
+     *
+     * 注意：lastHeartbeat 在**发送成功之后**才更新。
+     * 之前是先更新再发，transport 未就绪时那次失败也占用了限流窗口，
+     * 导致手环端长时间收不到 status。
+     */
+    private fun pushStatus(force: Boolean = false) {
         val now = System.currentTimeMillis()
-        if (now - lastHeartbeat < HEARTBEAT_MS - 500) return
+        if (!force && now - lastHeartbeat < HEARTBEAT_MS - 500) return
 
-        // 注意：lastHeartbeat 在**发送成功之后**才更新。
-        // 之前是先更新再发，如果那次因为 transport 未就绪失败，
-        // 接下来 4.5 秒都不会重试，手环端一直收不到 status，
-        // linkOk 保持 false，触摸板全部失效。
-        val t = transport ?: return
+        val tr = transport ?: return
 
         val battery = try {
             (getSystemService(Context.BATTERY_SERVICE) as? BatteryManager)
                 ?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
-        } catch (t: Throwable) {
+        } catch (e: Throwable) {
             -1
         }
         try {
-            t.sendRaw(
+            tr.sendRaw(
                 StatusCodec.encode(
                     id = "st-${seq.incrementAndGet()}",
-                    link = if (t.hasNode()) "connected" else "disconnected",
+                    link = if (tr.hasNode()) "connected" else "disconnected",
                     battery = battery,
                     listening = ControlAccessibilityService.Access.isReady(),
                     tiltOn = tiltOn,
