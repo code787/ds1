@@ -2,7 +2,7 @@
   <div class="page">
     <div class="status">
       <text class="dot {{ linkOk ? 'dot-ok' : 'dot-bad' }}">{{ linkOk ? '●' : '○' }}</text>
-      <text class="status-text">{{ statusText }}</text>
+      <text class="status-text" onlongpress="checkReady">{{ statusText }}</text>
       <text class="battery" if="{{ batteryVisible }}">{{ batteryText }}</text>
     </div>
 
@@ -144,12 +144,26 @@ export default {
       this.errorText = "app 实例不可用";
       return;
     }
-    const ok = app.send(cmd);
-    // 把发送结果直接显示在页面上——手环端没有 adb，这是唯一的现场反馈
-    const err = typeof app.lastError === "function" ? app.lastError() : "";
-    const text = ok ? "已发送 " + (cmd.t || "") : "发送失败: " + err;
-    if (this.padHint !== text) this.padHint = text;
-    if (this.errorText !== err) this.errorText = err;
+    const name = cmd.t || "";
+
+    // 先显示"发送中"，回调到了再更新——手环端没有 adb，页面是唯一反馈
+    if (this.padHint !== "发送中 " + name) this.padHint = "发送中 " + name;
+
+    app.send(cmd, (ok, err) => {
+      const text = ok ? "已发送 " + name : "发送失败 " + name;
+      if (this.padHint !== text) this.padHint = text;
+      if (this.errorText !== (err || "")) this.errorText = err || "";
+    });
+  },
+
+  /** 查一下连接状态，显示在页面上。 */
+  checkReady() {
+    const app = this.$app.$def;
+    if (!app || typeof app.readyState !== "function") return;
+    app.readyState((status) => {
+      const text = status === 1 ? "链路已就绪" : "链路状态=" + status;
+      if (this.padHint !== text) this.padHint = text;
+    });
   },
 
   buzz() {

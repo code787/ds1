@@ -1,38 +1,20 @@
 <script>
-// 闭源 ControlPhone 用的是 @app-module/ 前缀（编译后形态），
-  // 源码形态是 @system.*。两种都试，取到哪个用哪个。
 const interconnect = require("@system.interconnect");
 
-// 不用 system.vibrator：闭源 ControlPhone（用户真机跑通）只用
-// app / battery / device / interconnect 四个模块，没有 vibrator。
-// 而且代码里 require 了未在 manifest features 声明的模块，
-// aiot-toolkit 会直接报 "afterCompile: Copy resource files error: missing feature"。
-// 震动不是核心功能，去掉。
-
 /**
- * 手环端链路层。
+ * 手环端链路层。严格按小米官方示例 interconnect-demo 的形态写。
  *
- * 官方 interconnect 的用法（照抄自小米官方示例与导航环实测通过的实现）：
- * - 监听：connect.onmessage = (event) => {}   是**属性赋值**，不是方法调用
- * - 发送：connect.send({ data, success, fail })   必须带回调对象
- * - 生命周期：onopen / onclose / onerror 也是属性赋值
+ * 官方示例的关键做法（我一开始全都漏了）：
+ * 1. 每次用之前 this._connect = interconnect.instance() 重建实例，
+ *    然后立刻重新绑定 onmessage / onopen / onclose / onerror。
+ *    只在 onCreate 里绑一次，后面就收不到消息。
+ * 2. 发送前用 getReadyState() 确认连接状态（1=连接成功）。
+ * 3. send 的 success / fail 必须是函数，传字符串会走错误分支。
+ * 4. 发送用 { data: ... } 对象形式。
  *
- * 之前写成 onMessage(cb) / send(str)，运行时根本不会收到消息，
- * 表现为手环一直显示「未连接手机」——手机端发什么都没人接。
- *
- * event 的形状是 { data: ... }，data 可能是字符串也可能是对象，两种都要接。
+ * 不使用 system.vibrator：require 未在 manifest features 声明的模块，
+ * aiot-toolkit 会直接报 "Copy resource files error: missing feature"。
  */
-/** 把异常转成可读文本，Vela 里 e.message 不一定存在。 */
-function errText(e) {
-  if (!e) return "unknown";
-  if (e.message) return String(e.message);
-  try {
-    return JSON.stringify(e);
-  } catch (x) {
-    return String(e);
-  }
-}
-
 export default {
   onLink: "unknown",
   battery: -1,
@@ -40,60 +22,43 @@ export default {
   page: null,
 
   onCreate() {
-    try {
-      const connect = interconnect.instance();
-      this._connect = connect;
+    this._lastError = "";
+    this._rebuild();
+  },
 
-      // ---- 收消息 ----
-      connect.onmessage = (event) => {
+  _rebuild() {
+    try {
+      this._connect = interconnect.instance();
+      const conn = this._connect;
+      conn.onmessage = (res) => {
         try {
-          const data = event && event.data !== undefined ? event.data : event;
-          let decoded = data;
+          const data = res && res.data !== undefined ? res.data : res;
+          let frame = data;
           if (typeof data === "string") {
-            try {
-              decoded = JSON.parse(data);
-            } catch (e) {
-              decoded = null;
-            }
+            try { frame = JSON.parse(data); } catch (e) { frame = null; }
           }
-          if (!decoded || typeof decoded !== "object") return;
-          this._handleFrame(decoded);
+          if (!frame || typeof frame !== "object") return;
+          this._handleFrame(frame);
         } catch (err) {
-          // 单帧解析失败不能影响后续帧
+          // 单帧失败不影响后续
         }
       };
-
-      // ---- 链路状态 ----
-      connect.onopen = () => {
-        this.onLink = "connected";
-        this._push();
-        // 连上后立刻握手，告诉手机端「我在」
-        this.handshake();
-      };
-      connect.onclose = () => {
-        this.onLink = "disconnected";
-        this._push();
-      };
-      connect.onerror = () => {
-        this.onLink = "error";
-        this._push();
-      };
+      conn.onopen = () => { this.onLink = "connected"; this._push(); };
+      conn.onclose = () => { this.onLink = "disconnected"; this._push(); };
+      conn.onerror = () => { this.onLink = "error"; this._push(); };
     } catch (e) {
       this.onLink = "unavailable";
+      this._lastError = "instance 失败: " + errText(e);
     }
   },
 
   onDestroy() {
-    const connect = this._connect;
-    if (!connect) return;
+    const conn = this._connect;
+    if (!conn) return;
     try {
-      connect.onmessage = null;
-      connect.onopen = null;
-      connect.onclose = null;
-      connect.onerror = null;
-    } catch (e) {
-      // 解绑失败不影响退出
-    }
+      conn.onmessage = null; conn.onopen = null;
+      conn.onclose = null; conn.onerror = null;
+    } catch (e) { /* 解绑失败不影响退出 */ }
   },
 
   _handleFrame(frame) {
@@ -102,96 +67,66 @@ export default {
       this.battery = typeof frame.battery === "number" ? frame.battery : -1;
       this.listening = frame.listening === true;
       this._push();
-      this._ack(frame.id);
       return;
     }
     if (frame.kind === "ack") {
-      if (this.page && typeof this.page.onAck === "function") {
-        this.page.onAck(frame.refId);
-      }
+      if (this.page && typeof this.page.onAck === "function") this.page.onAck(frame.refId);
     }
-  },
-
-  _ack(refId) {
-    this.send({ t: "ack", refId: refId || "status" });
   },
 
   _push() {
     if (this.page && typeof this.page.onStatus === "function") {
-      this.page.onStatus({
-        link: this.onLink,
-        battery: this.battery,
-        listening: this.listening,
+      this.page.onStatus({ link: this.onLink, battery: this.battery, listening: this.listening });
+    }
+  },
+
+  attachPage(page) { this.page = page; this._push(); },
+  detachPage() { this.page = null; },
+
+  send(cmd, onResult) {
+    this._lastError = "";
+    try {
+      this._rebuild();
+      const conn = this._connect;
+      if (!conn) {
+        this._lastError = "连接实例不可用";
+        if (onResult) onResult(false, this._lastError);
+        return false;
+      }
+      conn.send({
+        data: JSON.stringify(cmd),
+        success: () => { this._lastError = ""; if (onResult) onResult(true, ""); },
+        fail: (res, code) => {
+          const msg = "fail code=" + (code === undefined ? "?" : code) + " msg=" + (res && res.data ? res.data : errText(res));
+          this._lastError = msg;
+          if (onResult) onResult(false, msg);
+        },
       });
-    }
-  },
-
-  /** 页面注册自己，用于接收状态与回执。 */
-  attachPage(page) {
-    this.page = page;
-    this._push();
-  },
-
-  detachPage() {
-    this.page = null;
-  },
-
-  /**
-   * 发送一条指令。
-   *
-   * 反编译 ControlPhone（真机跑通）后发现它有两种 send 形式：
-   *   conn.send("control", payload)     ← 通道名 + 对象，业务指令用这个
-   *   conn.send({ data: {...} })        ← 对象形式，握手用这个
-   *
-   * 它还有握手：连上后先发 { tag: "__hs__" } 标记就绪，之后才发业务消息。
-   *
-   * 这里两种都试，成功一个就返回；把失败原因留给页面显示，便于诊断。
-   */
-  send(cmd) {
-    const connect = this._connect;
-    if (!connect) {
-      this._lastSendError = "connect 不存在";
-      return false;
-    }
-    const text = JSON.stringify(cmd);
-
-    try {
-      connect.send({ data: text });
-      this._lastSendError = "";
       return true;
-    } catch (e1) {
-      this._lastSendError = "对象形式失败: " + errText(e1);
-    }
-
-    try {
-      connect.send("control", cmd);
-      this._lastSendError = "";
-      return true;
-    } catch (e2) {
-      this._lastSendError += " / 通道形式失败: " + errText(e2);
-      return false;
-    }
-  },
-
-  /** 握手：告诉手机「我准备好了」。失败不阻塞。 */
-  handshake() {
-    const connect = this._connect;
-    if (!connect) return;
-    try {
-      connect.send({ data: JSON.stringify({ tag: "__hs__", count: 1, app: "wristcontrol" }) });
     } catch (e) {
-      // 握手失败不影响后续
+      this._lastError = "send 抛出: " + errText(e);
+      if (onResult) onResult(false, this._lastError);
+      return false;
     }
   },
 
-  /** 供页面显示最后一次发送错误。 */
-  lastError() {
-    return this._lastSendError || "";
+  readyState(onResult) {
+    try {
+      const conn = this._connect || interconnect.instance();
+      conn.getReadyState({
+        success: (res) => { if (onResult) onResult(res && res.status !== undefined ? res.status : -1); },
+        fail: () => { if (onResult) onResult(-1); },
+      });
+    } catch (e) { if (onResult) onResult(-1); }
   },
 
-  /** 震动反馈占位。当前不启用（见文件头说明）。 */
-  buzz() {
-    // 有意留空
-  },
+  lastError() { return this._lastError || ""; },
+  buzz() { /* 不用 vibrator */ },
 };
+
+function errText(e) {
+  if (!e) return "unknown";
+  if (e.message) return String(e.message);
+  try { return JSON.stringify(e); } catch (x) { return String(e); }
+}
 </script>
