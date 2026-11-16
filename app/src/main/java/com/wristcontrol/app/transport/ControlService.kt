@@ -438,7 +438,12 @@ class ControlService : Service() {
     private fun pushStatus() {
         val now = System.currentTimeMillis()
         if (now - lastHeartbeat < HEARTBEAT_MS - 500) return
-        lastHeartbeat = now
+
+        // 注意：lastHeartbeat 在**发送成功之后**才更新。
+        // 之前是先更新再发，如果那次因为 transport 未就绪失败，
+        // 接下来 4.5 秒都不会重试，手环端一直收不到 status，
+        // linkOk 保持 false，触摸板全部失效。
+        val t = transport ?: return
 
         val battery = try {
             (getSystemService(Context.BATTERY_SERVICE) as? BatteryManager)
@@ -446,7 +451,6 @@ class ControlService : Service() {
         } catch (t: Throwable) {
             -1
         }
-        val t = transport ?: return
         try {
             t.sendRaw(
                 StatusCodec.encode(
@@ -454,8 +458,10 @@ class ControlService : Service() {
                     link = if (t.hasNode()) "connected" else "disconnected",
                     battery = battery,
                     listening = ControlAccessibilityService.Access.isReady(),
+                    tiltOn = tiltOn,
                 ),
             )
+            lastHeartbeat = now   // 只有真发出去才计时
         } catch (t: Throwable) {
             Log.w(TAG, "推送状态失败: ${t.javaClass.simpleName}")
         }
