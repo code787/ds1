@@ -27,6 +27,7 @@ class GesturePanel(private val activity: Activity) {
     private val cfgStore = GestureConfigStore(activity)
     private var cfg = cfgStore.load()
     private var rotationValue: TextView? = null
+    private var calStatus: TextView? = null
 
     private val root = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL
@@ -75,6 +76,50 @@ class GesturePanel(private val activity: Activity) {
         })
         root.addView(liveBox)
         root.addView(liveSub)
+
+        // ---- 姿势校准 ----
+        root.addView(TextView(activity).apply {
+            text = "姿势校准"
+            textSize = 16f
+            setPadding(0, 8, 0, 4)
+        })
+        root.addView(TextView(activity).apply {
+            text = "手腕摆到最舒服的姿势，点「校准」。之后倾斜都相对这个姿势判断，松手即回零，不用再保持水平。手环上长按「体感」开关也能校准。"
+            textSize = 13f
+        })
+        calStatus = TextView(activity).apply {
+            text = "未校准（以水平面为零位）"
+            textSize = 14f
+            setPadding(0, 8, 0, 4)
+        }
+        root.addView(calStatus)
+        root.addView(LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(Button(activity).apply {
+                text = "以当前姿势校准"
+                setOnClickListener {
+                    val svc = com.wristcontrol.app.transport.ServiceRef.current
+                    if (svc == null) {
+                        Toast.makeText(activity, "先去主页启动桥接", Toast.LENGTH_SHORT).show()
+                    } else {
+                        svc.startCalibration()
+                        Toast.makeText(activity, "保持手腕不动，正在校准…", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            })
+            addView(Button(activity).apply {
+                text = "清除校准"
+                setOnClickListener {
+                    val svc = com.wristcontrol.app.transport.ServiceRef.current
+                    if (svc == null) {
+                        Toast.makeText(activity, "先去主页启动桥接", Toast.LENGTH_SHORT).show()
+                    } else {
+                        svc.clearCalibration()
+                        Toast.makeText(activity, "已清除，恢复水平面基准", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            })
+        })
 
         // ---- 传感器数据 ----
         root.addView(TextView(activity).apply {
@@ -183,6 +228,7 @@ class GesturePanel(private val activity: Activity) {
         if (svc == null) {
             if (liveBox.text != "桥接未启动") liveBox.text = "桥接未启动"
             if (liveSub.text != "先去主页点「启动桥接」") liveSub.text = "先去主页点「启动桥接」"
+            if (calStatus?.text != "桥接未启动") calStatus?.text = "桥接未启动"
             return
         }
         val dir = svc.lastLiveDir
@@ -191,6 +237,9 @@ class GesturePanel(private val activity: Activity) {
         if (liveBox.text != label) liveBox.text = label
         val sub = if (path.isNotEmpty()) "本次序列: $path" else "还没识别到方向"
         if (liveSub.text != sub) liveSub.text = sub
+
+        val calText = if (svc.engineState().isCalibrated()) "已校准：以你的姿势为零位" else "未校准（以水平面为零位）"
+        if (calStatus?.text != calText) calStatus?.text = calText
 
         // 传感器原始数据
         val t = svc.lastTilt

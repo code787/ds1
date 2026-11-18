@@ -47,6 +47,9 @@ sealed interface Command {
     /** 手环报告当前体感开关状态。 */
     data class TiltState(val on: Boolean) : Command
 
+    /** 手环请求姿势校准：把当前手腕姿态记为零位（长按体感开关触发）。 */
+    data object Calibrate : Command
+
     /**
      * 手环上报的**原始加速度**。
      *
@@ -95,6 +98,7 @@ sealed interface Command {
                 "gesture" -> GestureHit(o.optString("path"))
                 "syncreq" -> SyncRequest
                 "tilt" -> TiltState(o.optBoolean("on", false))
+                "cal" -> Calibrate
                 "sensor" -> SensorState(
                     ok = o.optBoolean("ok", false),
                     msg = o.optString("msg"),
@@ -192,5 +196,14 @@ object StatusCodec {
             put("v", 1)
             put("kind", "ack")
             put("refId", refId)
+        }.toString().toByteArray(Charsets.UTF_8)
+
+    /** 手机 → 手环的校准结果帧。采样约 0.7 秒后才回，ok=false 时 msg 是失败原因。 */
+    fun encodeCalResult(ok: Boolean, msg: String): ByteArray =
+        JSONObject().apply {
+            put("v", 1)
+            put("kind", "calres")
+            put("ok", ok)
+            put("msg", msg)
         }.toString().toByteArray(Charsets.UTF_8)
 }

@@ -1,6 +1,6 @@
 {
   "name": "wristcontrol-band",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "WristControl 手环端（小米 Vela 快应用）",
   "scripts": {

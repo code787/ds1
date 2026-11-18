@@ -87,4 +87,29 @@ class GestureConfigStore(context: Context) {
             .putInt("rotationOffset", c.rotationOffset)
             .apply()
     }
+
+    // ---- 校准基线（只存手机，不下发手环——识别在手机端） ----
+
+    /** 读取校准基线；未校准返回 null。 */
+    fun loadBaseline(): FloatArray? {
+        if (!prefs.getBoolean("calOn", false)) return null
+        return floatArrayOf(
+            prefs.getFloat("calX", 0f),
+            prefs.getFloat("calY", 0f),
+            prefs.getFloat("calZ", 1f),
+        )
+    }
+
+    fun saveBaseline(x: Float, y: Float, z: Float) {
+        prefs.edit()
+            .putBoolean("calOn", true)
+            .putFloat("calX", x)
+            .putFloat("calY", y)
+            .putFloat("calZ", z)
+            .apply()
+    }
+
+    fun clearBaseline() {
+        prefs.edit().putBoolean("calOn", false).apply()
+    }
 }

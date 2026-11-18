@@ -150,6 +150,13 @@ export default {
     }
     if (frame.kind === "ack") {
       if (this.page && typeof this.page.onAck === "function") this.page.onAck(frame.refId);
+      return;
+    }
+    if (frame.kind === "calres") {
+      // 姿势校准结果：手机采完样才回，ok/msg 直接给页面显示
+      if (this.page && typeof this.page.onCalResult === "function") {
+        this.page.onCalResult(frame.ok === true, frame.msg || "");
+      }
     }
   },
 

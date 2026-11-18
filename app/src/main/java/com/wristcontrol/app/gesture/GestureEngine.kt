@@ -1,6 +1,7 @@
 package com.wristcontrol.app.gesture
 
 import kotlin.math.atan2
+import kotlin.math.acos
 import kotlin.math.asin
 import kotlin.math.hypot
 import kotlin.math.sqrt
@@ -86,6 +87,38 @@ class GestureEngine(private var config: GestureConfig = GestureConfig()) {
     private var candidate: String? = null
     private var candidateCount = 0
 
+    /**
+     * 校准基线：用户舒适姿势下的重力单位向量。
+     *
+     * 未校准时以水平面为零位——但手腕自然放着本来就是倾斜的，
+     * 「放松」不等于「零位」，怎么放都别扭。校准后以基线为零位：
+     * 倾角 = 当前重力向量与基线的夹角，方向 = 相对基线的偏移方向。
+     * 基线持久化在手机（GestureConfigStore），重启不丢。
+     */
+    private var calibrated = false
+    private var baseX = 0.0
+    private var baseY = 0.0
+    private var baseZ = 1.0
+
+    /** 记录校准基线（任意长度向量，内部归一化）。 */
+    fun setBaseline(x: Double, y: Double, z: Double) {
+        val g = hypot(hypot(x, y), z)
+        if (g < 0.01) return
+        baseX = x / g
+        baseY = y / g
+        baseZ = z / g
+        calibrated = true
+        reset()
+    }
+
+    /** 清除校准，恢复水平面基准。 */
+    fun clearBaseline() {
+        calibrated = false
+        reset()
+    }
+
+    fun isCalibrated(): Boolean = calibrated
+
     /** 最近一次滤波后的值，供诊断显示。 */
     @Volatile
     var lastX: Float = 0f
@@ -94,7 +127,7 @@ class GestureEngine(private var config: GestureConfig = GestureConfig()) {
     @Volatile
     var lastAngle: Float = 0f
 
-    /** 相对水平面的倾角（度）。0=平放，90=竖直。 */
+    /** 倾角（度）。未校准=相对水平面（0=平放）；已校准=相对校准姿势（0=回到零位）。 */
     var lastTilt: Float = 0f
     @Volatile
     var lastDir: String = ""
@@ -164,10 +197,31 @@ class GestureEngine(private var config: GestureConfig = GestureConfig()) {
         //   tiltDeg  = asin(tiltFrac) 转角度
         // 这样 deadZone 才是真正的「倾斜多少度才算动」。
         val gTotal = hypot(hypot(x, y), az.toDouble())
-        val tiltFrac = if (gTotal > 0.01) hypot(x, y) / gTotal else 0.0
-        val tiltDeg = Math.toDegrees(asin(tiltFrac.coerceIn(0.0, 1.0)))
-
-        val angle = ((Math.toDegrees(atan2(y, x)) + config.rotationOffset) % 360 + 360) % 360
+        val tiltDeg: Double
+        val angle: Double
+        if (calibrated && gTotal > 0.01) {
+            // 校准模式：零位 = 用户校准时的姿势，不是水平面。
+            // 倾角 = 当前重力方向与基线方向的夹角（度），松手回到基线即回零。
+            val cx = x / gTotal
+            val cy = y / gTotal
+            val cz = az.toDouble() / gTotal
+            val dot = (cx * baseX + cy * baseY + cz * baseZ).coerceIn(-1.0, 1.0)
+            tiltDeg = Math.toDegrees(acos(dot))
+            // 方向 = 相对基线的偏移在 x/y 平面上的指向。
+            // 偏移太小时方向不可靠，沿用上一帧角度（此时倾角也小，出不了死区）。
+            val dx = cx - baseX
+            val dy = cy - baseY
+            angle = if (hypot(dx, dy) < 0.02) {
+                lastAngle.toDouble()
+            } else {
+                ((Math.toDegrees(atan2(dy, dx)) + config.rotationOffset) % 360 + 360) % 360
+            }
+        } else {
+            // 未校准：以水平面为零位（旧行为，保证没校准也能用）
+            val tiltFrac = if (gTotal > 0.01) hypot(x, y) / gTotal else 0.0
+            tiltDeg = Math.toDegrees(asin(tiltFrac.coerceIn(0.0, 1.0)))
+            angle = ((Math.toDegrees(atan2(y, x)) + config.rotationOffset) % 360 + 360) % 360
+        }
         lastAngle = angle.toFloat()
         lastTilt = tiltDeg.toFloat()
 

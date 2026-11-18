@@ -186,6 +186,9 @@ class ControlService : Service() {
                 sensorMsg = ""
             }
 
+            // 校准采样窗口：收集原始帧，窗口结束后取平均作为基线
+            collectCalSample(command.x, command.y, command.z)
+
             // 界面要读的数据：卡尔曼滤波后的值、角度、方向
             val result = engine.feed(command.x, command.y, command.z)
 
@@ -217,6 +220,10 @@ class ControlService : Service() {
             tiltEnabled = command.on
             DiagnoseLog.append(this, "体感开关: ${if (command.on) "开" else "关"}")
             pushStatus()
+            return
+        }
+        if (command is Command.Calibrate) {
+            startCalibration()
             return
         }
         val a11yReady = ControlAccessibilityService.Access.isReady()
@@ -255,6 +262,7 @@ class ControlService : Service() {
                 is Command.TiltState -> false
                 is Command.RawAccel -> false
                 is Command.SensorState -> false
+                Command.Calibrate -> false
             }
         } finally {
             try {
@@ -302,9 +310,12 @@ class ControlService : Service() {
     private val gestureStore by lazy { com.wristcontrol.app.gesture.GestureStore(this) }
     private val configStore by lazy { com.wristcontrol.app.gesture.GestureConfigStore(this) }
 
-    /** 手势识别引擎，跑在手机端。 */
+    /** 手势识别引擎，跑在手机端。启动时恢复上次校准的姿势基线。 */
     private val engine by lazy {
-        com.wristcontrol.app.gesture.GestureEngine(configStore.load())
+        com.wristcontrol.app.gesture.GestureEngine(configStore.load()).also { e ->
+            val b = configStore.loadBaseline()
+            if (b != null) e.setBaseline(b[0].toDouble(), b[1].toDouble(), b[2].toDouble())
+        }
     }
 
     /** 供界面读实时状态。 */
@@ -384,6 +395,94 @@ class ControlService : Service() {
             return
         }
         handleCommand(cmd)
+    }
+
+    // ================= 姿势校准 =================
+
+    private val calLock = Any()
+    private var calSamples: MutableList<FloatArray>? = null
+    private var calStartAt = 0L
+    private val calTimeout = Runnable {
+        synchronized(calLock) {
+            if (calSamples != null) {
+                calSamples = null
+                sendCalResult(false, "未收到传感器数据，请先打开体感开关")
+                DiagnoseLog.append(this@ControlService, "校准失败：窗口内没有原始帧")
+            }
+        }
+    }
+
+    /** 开始校准：收集约 0.7 秒原始帧，取平均作为零位基线。手环长按体感键或面板按钮触发。 */
+    fun startCalibration() {
+        synchronized(calLock) {
+            if (calSamples != null) return
+            calSamples = mutableListOf()
+            calStartAt = System.currentTimeMillis()
+        }
+        handler.removeCallbacks(calTimeout)
+        handler.postDelayed(calTimeout, 2500)
+        DiagnoseLog.append(this, "开始姿势校准：保持手腕不动…")
+    }
+
+    /** 面板按钮用：清除校准，恢复水平面基准。 */
+    fun clearCalibration() {
+        engine.clearBaseline()
+        configStore.clearBaseline()
+        DiagnoseLog.append(this, "已清除校准基线")
+    }
+
+    private fun collectCalSample(x: Float, y: Float, z: Float) {
+        var snapshot: List<FloatArray>? = null
+        synchronized(calLock) {
+            val list = calSamples ?: return
+            list.add(floatArrayOf(x, y, z))
+            if (System.currentTimeMillis() - calStartAt >= 700) {
+                snapshot = list.toList()
+                calSamples = null
+            }
+        }
+        if (snapshot != null) finishCalibration(snapshot!!)
+    }
+
+    private fun finishCalibration(samples: List<FloatArray>) {
+        handler.removeCallbacks(calTimeout)
+        if (samples.size < 10) {
+            sendCalResult(false, "数据太少，请打开体感后重试")
+            return
+        }
+        var sx = 0.0; var sy = 0.0; var sz = 0.0
+        for (s in samples) { sx += s[0]; sy += s[1]; sz += s[2] }
+        val n = samples.size.toDouble()
+        val mx = sx / n; val my = sy / n; val mz = sz / n
+        val mg = kotlin.math.hypot(kotlin.math.hypot(mx, my), mz)
+        if (mg < 0.01) {
+            sendCalResult(false, "传感器读数异常，请重试")
+            return
+        }
+        val bx = mx / mg; val by = my / mg; val bz = mz / mg
+        // 稳定性检查：任何一帧偏离均值超过 12° 就说明手在动，拒绝校准
+        for (s in samples) {
+            val g = kotlin.math.hypot(kotlin.math.hypot(s[0].toDouble(), s[1].toDouble()), s[2].toDouble())
+            if (g < 0.01) continue
+            val dot = ((s[0] / g) * bx + (s[1] / g) * by + (s[2] / g) * bz).coerceIn(-1.0, 1.0)
+            if (Math.toDegrees(Math.acos(dot)) > 12.0) {
+                sendCalResult(false, "手在动，端稳一点再校准")
+                DiagnoseLog.append(this, "校准失败：采样抖动过大")
+                return
+            }
+        }
+        engine.setBaseline(mx, my, mz)
+        configStore.saveBaseline(mx.toFloat(), my.toFloat(), mz.toFloat())
+        sendCalResult(true, "已校准")
+        DiagnoseLog.append(this, "校准成功：基线=(%.3f, %.3f, %.3f) 样本=%d".format(bx, by, bz, samples.size))
+    }
+
+    private fun sendCalResult(ok: Boolean, msg: String) {
+        try {
+            transport?.sendRaw(StatusCodec.encodeCalResult(ok, msg))
+        } catch (t: Throwable) {
+            Log.w(TAG, "发送校准结果失败: ${t.javaClass.simpleName}")
+        }
     }
 
     /** 把手势模板推给手环。 */

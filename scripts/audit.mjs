@@ -81,8 +81,13 @@ if (!encMatch) {
 // ------------------------------------------------ 2. 手环发送的帧 vs 解析
 console.log("\n[2] 手环发出的帧 vs 手机端解析");
 
-const sentFrames = [...src.appux.matchAll(/this\.send\(\{\s*\n?\s*t:\s*"([^"]+)"/g)].map((m) => m[1]);
-const parsed = [...src.proto.matchAll(/"([a-z]+)"\s*->\s*\w+\(/g)].map((m) => m[1]);
+const sentFrames = [
+  ...[...src.appux.matchAll(/this\.send\(\{\s*\n?\s*t:\s*"([^"]+)"/g)].map((m) => m[1]),
+  // 页面经 _send 发的帧同样要对上解析分支（如校准 t:"cal"）
+  ...[...src.page.matchAll(/this\._send\(\{\s*t:\s*"([^"]+)"/g)].map((m) => m[1]),
+];
+// data object 分支没有括号（如 "cal" -> Calibrate），不能要求 \(
+const parsed = [...src.proto.matchAll(/"([a-z]+)"\s*->\s*\w+/g)].map((m) => m[1]);
 
 for (const t of new Set(sentFrames)) {
   if (!parsed.includes(t)) fail('手环发 t="' + t + '" 但手机端没解析');

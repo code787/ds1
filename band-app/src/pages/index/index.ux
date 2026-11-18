@@ -5,7 +5,7 @@
       <text class="status-text" onlongpress="checkReady">{{ statusText }}</text>
       <text class="battery" if="{{ batteryVisible }}">{{ batteryText }}</text>
       <!-- 体感开关放右上角，独立区域，不和触摸板抢点击 -->
-      <div class="tilt-btn {{ tiltOn ? 'tilt-on' : 'tilt-off' }}" onclick="toggleTilt">
+      <div class="tilt-btn {{ tiltOn ? 'tilt-on' : 'tilt-off' }}" onclick="toggleTilt" onlongpress="calibrate">
         <text class="tilt-label">{{ tiltOn ? '体感开' : '体感关' }}</text>
       </div>
     </div>
@@ -98,7 +98,7 @@ export default {
     const tiltOn = status.tiltOn === true;
     if (this.tiltOn !== tiltOn) {
       this.tiltOn = tiltOn;
-      this.tiltHint = tiltOn ? "体感已开，倾斜手腕试试" : "";
+      this.tiltHint = tiltOn ? "体感已开，长按开关校准" : "";
       if (!tiltOn) this.sensorText = "";
     }
 
@@ -194,6 +194,35 @@ export default {
     const app = this.$app.$def;
     if (!app || typeof app.setTilt !== "function") return;
     app.setTilt(!this.tiltOn);
+  },
+
+  /** 长按体感开关：把当前手腕姿势校准为零位。 */
+  calibrate() {
+    if (!this.linkOk) {
+      this.buzz();
+      return;
+    }
+    if (!this.tiltOn) {
+      this.errorText = "先打开体感再校准";
+      this.buzz();
+      return;
+    }
+    this.tiltHint = "端稳手腕，校准中…";
+    this._send({ t: "cal" });
+  },
+
+  /** 手机校准结果（calres 帧）。 */
+  onCalResult(ok, msg) {
+    this.tiltHint = ok ? "已校准：当前姿势为零位" : "校准失败：" + msg;
+    // cal 不走 ack，发送提示在这里恢复
+    if (this.padHint.indexOf("已发送") === 0) {
+      this.padHint = this.linkOk ? "滑动 / 点击" : "等待手机连接";
+    }
+    const app = this.$app.$def;
+    if (app && typeof app.buzz === "function") app.buzz(ok ? "ok" : "err");
+    setTimeout(() => {
+      if (this.tiltOn) this.tiltHint = "体感已开，长按开关校准";
+    }, 3000);
   },
 
   /** 长按触摸板：打开完整诊断层。 */
