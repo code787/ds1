@@ -1,8 +1,8 @@
 {
   "package": "com.wristcontrol.app",
   "name": "遥控手机",
-  "versionName": "0.1.0",
-  "versionCode": 1,
+  "versionName": "0.2.0",
+  "versionCode": 2,
   "icon": "/logo.png",
   "minPlatformVersion": 1000,
   "deviceTypeList": ["watch"],

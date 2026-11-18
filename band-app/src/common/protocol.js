@@ -31,9 +31,9 @@ function encode(cmd) {
 /** 解析手机发来的帧。无法识别返回 null，绝不猜。 */
 function parseFrame(payload) {
   try {
-    const text = typeof payload === "string" ? payload : String(payload);
-    const o = JSON.parse(text);
-    if (!o) return null;
+    // SDK 可能直接给对象；String(对象) 会变成 "[object Object]"，必须区分
+    const o = typeof payload === "string" ? JSON.parse(payload) : payload;
+    if (!o || typeof o !== "object") return null;
     if (o.kind === "ack") {
       return { kind: "ack", refId: typeof o.refId === "string" ? o.refId : "" };
     }
@@ -44,9 +44,8 @@ function parseFrame(payload) {
         link: typeof o.link === "string" ? o.link : "unknown",
         battery: typeof o.battery === "number" ? o.battery : -1,
         listening: o.listening === true,
-        // 手机下发的体感开关状态。漏了这个，页面永远收不到，
-        // 开关按钮就一直是初始的「关」。
-        tiltOn: o.tiltOn === true,
+        // 手机端 StatusCodec 发的键是 "tilt"（兼容旧写法 tiltOn）
+        tiltOn: o.tilt === true || o.tiltOn === true,
       };
     }
     return null;
@@ -55,9 +54,10 @@ function parseFrame(payload) {
   }
 }
 
-/** 链路状态 → 界面文案。优先级：断链 > 未开手势服务 > 正常。 */
-function statusText(linkOk, listening) {
-  if (!linkOk) return "未连接手机";
+/** 链路状态 → 界面文案。优先级：未知 > 断链 > 未开手势服务 > 正常。 */
+function statusText(link, listening) {
+  if (link === "unknown") return "正在连接";
+  if (link !== "connected") return "未连接手机";
   if (!listening) return "手机手势服务未开";
   return "已连接";
 }

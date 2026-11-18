@@ -13,8 +13,8 @@ const buzz = require("./common/buzz");
  * 3. send 的 success / fail 必须是函数，传字符串会走错误分支。
  * 4. 发送用 { data: ... } 对象形式。
  *
- * 不使用 system.vibrator：require 未在 manifest features 声明的模块，
- * aiot-toolkit 会直接报 "Copy resource files error: missing feature"。
+ * system.vibrator 已在 manifest features 声明，震动反馈走 common/buzz.js。
+ * require 未声明的模块会让 aiot-toolkit 报 "Copy resource files error: missing feature"。
  */
 export default {
   onLink: "unknown",
@@ -24,7 +24,8 @@ export default {
 
   // ---- 体感配置（由手机下发） ----
   cfg: {
-    deadZone: 12,
+    deadZoneH: 18,
+    deadZoneV: 18,
     holdMs: 120,
     idleEndMs: 600,
     // 手环横向佩戴：屏幕长边水平，加速度计 x/y 轴相对"用户以为的上下左右"
@@ -128,11 +129,17 @@ export default {
       return;
     }
     if (frame.kind === "cfg") {
-      if (typeof frame.deadZone === "number") this.cfg.deadZone = frame.deadZone;
+      // 手机端下发的是 deadZoneH/deadZoneV（左右/上下分开），兼容旧的 deadZone
+      if (typeof frame.deadZoneH === "number") this.cfg.deadZoneH = frame.deadZoneH;
+      if (typeof frame.deadZoneV === "number") this.cfg.deadZoneV = frame.deadZoneV;
+      if (typeof frame.deadZone === "number") {
+        this.cfg.deadZoneH = frame.deadZone;
+        this.cfg.deadZoneV = frame.deadZone;
+      }
       if (typeof frame.holdMs === "number") this.cfg.holdMs = frame.holdMs;
       if (typeof frame.idleEndMs === "number") this.cfg.idleEndMs = frame.idleEndMs;
       if (typeof frame.rotationOffset === "number") this.cfg.rotationOffset = frame.rotationOffset;
-        if (typeof frame.tolerance === "number") this.cfg.tolerance = frame.tolerance;
+      if (typeof frame.tolerance === "number") this.cfg.tolerance = frame.tolerance;
       if (typeof frame.live === "boolean") this.cfg.live = frame.live;
       // 配置变了要重建录制器，否则旧参数还在用
       this._live = null;
@@ -302,17 +309,15 @@ export default {
   },
 
   _subscribeSensor() {
-    // 已经是 true 时也要重新订阅一次——状态可能失真（比如订阅失败但标志还是 true）。
-    // 先强制退订，再订阅，保证干净。
-    if (this.sensorSubscribed) {
-      this._forceUnsubscribe();
-    }
+    // 已订阅就直接返回。绝不能调 unsubscribeAccelerometer——
+    // 部分固件上它会触发底层驱动崩溃，手环直接重启（83a9fdd 的教训）。
+    // 订阅失败时 fail 回调会把标志置回 false，标志不会失真。
+    if (this.sensorSubscribed) return;
     try {
       const sensor = require("@system.sensor");
       this._sensor = sensor;
       sensor.subscribeAccelerometer({
-        // 直接写死，不从 gesture.js 取——webpack 打包后 gestureLib.INTERVAL 是 undefined，
-        // interval 传 undefined 会导致订阅失败。
+        // interval 直接写死："game" 约 20ms 一帧。传 undefined 会导致订阅失败。
         interval: "game",
         callback: (ret) => this._onAccel(ret),
         fail: (msg, code) => {
@@ -396,7 +401,15 @@ export default {
   lastDetail() {
     return { cmd: this._lastCmd || "", code: this._lastCode || "", msg: this._lastError || "" };
   },
-  buzz() { /* 不用 vibrator */ },
+  /** 震动反馈（盲操作时的确认通道）。kind: tick/ok/err/alarm。 */
+  buzz(kind) {
+    try {
+      if (kind === "ok") buzz.ok();
+      else if (kind === "err") buzz.err();
+      else if (kind === "alarm") buzz.alarm();
+      else buzz.tick();
+    } catch (e) { /* 震动只是反馈，失败不影响功能 */ }
+  },
 };
 
 function errText(e) {

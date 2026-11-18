@@ -56,9 +56,16 @@ object DiagnoseLog {
             val dir = context.getExternalFilesDir(null) ?: context.filesDir
             dir.mkdirs()
             val file = File(dir, FILE_NAME)
-            // 简单轮转：超过上限就清空重来，避免无限增长
+            // 轮转：超过上限时保留后半段，不能整个删掉——
+            // 出问题那一刻的日志往往就在被删掉的前半段里。
             if (file.exists() && file.length() > MAX_BYTES) {
-                file.delete()
+                try {
+                    val lines = file.readLines()
+                    val keep = lines.takeLast(lines.size / 2)
+                    file.writeText(keep.joinToString("\n") + "\n")
+                } catch (t: Throwable) {
+                    file.delete()
+                }
             }
             file.appendText(line + "\n")
         } catch (t: Throwable) {

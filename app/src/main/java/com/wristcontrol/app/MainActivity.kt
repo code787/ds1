@@ -40,6 +40,12 @@ class MainActivity : Activity() {
      * 之前按返回直接 finish() 会退到桌面，用户要的是回 App 起始页。
      */
     fun showMainPage() {
+        // 先停掉面板的轮询再丢弃，不然 Handler 一直拿着旧面板跑
+        try {
+            gesturePanel?.onPause()
+        } catch (t: Throwable) {
+            Log.w(TAG, "停止手势面板失败: ${t.javaClass.simpleName}")
+        }
         gesturePanel = null
         inGesturePanel = false
         try {

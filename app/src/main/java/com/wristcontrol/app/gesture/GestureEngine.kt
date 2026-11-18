@@ -271,13 +271,6 @@ object GestureCodec {
             .map { it.trim() }
             .filter { it.isNotEmpty() && Dir.fromCode(it) != null }
 
-    /** 手势模板的传输格式（手机 → 手环）。 */
-    fun toJson(g: Gesture): String {
-        val p = encodePath(g.path)
-        return "{\"id\":\"" + g.id + "\",\"name\":\"" + g.name +
-            "\",\"path\":\"" + p + "\",\"action\":\"" + g.action +
-            "\",\"arg\":\"" + g.arg + "\"}"
-    }
 }
 
 /**

@@ -53,6 +53,7 @@ export default {
     batteryText: "",
     padHint: "等待手机连接",
     errorText: "",
+    sensorText: "",
     tiltOn: false,
     tiltHint: "",
     diagOpen: false,
@@ -90,11 +91,16 @@ export default {
   /** 由 app.ux 推送链路状态。 */
   onStatus(status) {
     const linkOk = status.link === "connected";
-    // 体感开关以**手环本地**为准，不跟随手机。
-    // 之前这里跟着 status.tiltOn 改，而手机端初始 false，
-    // 每 5 秒一帧就把用户刚打开的开关压回去。
-    // 开关是用户在手上点的，手环才是真相源。
+    // status.tiltOn 来自 app.ux 的 _push()，是**手环本地**开关状态，
+    // 不是手机下发的值（手机状态帧只改 onLink/battery/listening）。
+    // 页面按钮必须跟着它同步，否则 toggleTilt 永远以为开关是关的。
     const listening = status.listening === true;
+    const tiltOn = status.tiltOn === true;
+    if (this.tiltOn !== tiltOn) {
+      this.tiltOn = tiltOn;
+      this.tiltHint = tiltOn ? "体感已开，倾斜手腕试试" : "";
+      if (!tiltOn) this.sensorText = "";
+    }
 
     if (this.linkOk !== linkOk) this.linkOk = linkOk;
 
@@ -121,6 +127,9 @@ export default {
     if (status.sensorError) {
       const e = "传感器: " + status.sensorError;
       if (this.errorText !== e) this.errorText = e;
+    } else if (this.errorText.indexOf("传感器: ") === 0) {
+      // 订阅恢复了就清掉旧的传感器错误，别一直挂着
+      this.errorText = "";
     }
     const padHint = linkOk && listening ? "滑动 / 点击" : "等待手机连接";
     if (this.padHint !== padHint) this.padHint = padHint;
@@ -128,8 +137,11 @@ export default {
 
   /** 由 app.ux 推送手机回执。 */
   onAck(refId) {
-    if (this.padHint === "已发送…") {
+    // _send 成功后 padHint 是「已发送 name」，收到执行回执再恢复提示
+    if (this.padHint.indexOf("已发送") === 0) {
       this.padHint = this.linkOk ? "滑动 / 点击" : "等待手机连接";
+      const app = this.$app.$def;
+      if (app && typeof app.buzz === "function") app.buzz("ok");
     }
   },
 
@@ -184,30 +196,6 @@ export default {
     app.setTilt(!this.tiltOn);
   },
 
-  /** 方向代码转中文。四方向：上/右/下/左。 */
-  dirLabel(code) {
-    if (code === "N") return "上";
-    if (code === "E") return "右";
-    if (code === "S") return "下";
-    if (code === "W") return "左";
-    return code || "";
-  },
-
-  /** app.ux 推送倾角方向（实时反馈）。 */
-  onTilt(hint, path, sensor) {
-    if (!this.tiltOn) return;
-    const cur = hint ? this.dirLabel(hint) : "";
-    const p = path && path.length ? path.map((d) => this.dirLabel(d)).join("→") : "";
-    const text = cur ? "当前 " + cur + (p ? " | " + p : "") : (p ? p : "静止");
-    if (this.tiltHint !== text) this.tiltHint = text;
-
-    // 传感器数值：不管有没有倾斜都显示
-    if (sensor) {
-      const s = "x" + sensor.ax + " y" + sensor.ay + " z" + sensor.az;
-      if (this.sensorText !== s) this.sensorText = s;
-    }
-  },
-
   /** 长按触摸板：打开完整诊断层。 */
   openDiag() {
     this.diagOpen = true;
@@ -259,6 +247,7 @@ export default {
       if (this.padHint !== text) this.padHint = text;
       const short = (err || "").slice(0, 18);
       if (this.errorText !== short) this.errorText = short;
+      if (!ok) this.buzz();
     });
   },
 
@@ -274,7 +263,7 @@ export default {
 
   buzz() {
     const app = this.$app.$def;
-    if (app && typeof app.buzz === "function") app.buzz();
+    if (app && typeof app.buzz === "function") app.buzz("err");
   },
 };
 </script>

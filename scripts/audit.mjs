@@ -33,7 +33,6 @@ const F = {
   panel: "app/src/main/java/com/wristcontrol/app/gesture/GesturePanel.kt",
   appux: "band-app/src/app.ux",
   page: "band-app/src/pages/index/index.ux",
-  gesture: "band-app/src/common/gesture.js",
   manifest: "band-app/src/manifest.json",
 };
 
@@ -204,6 +203,42 @@ for (const p of walk(path.join(ROOT, "app/src")).concat(walk(path.join(ROOT, "ba
   if (o !== c) { fail(path.relative(ROOT, p) + " 括号不平衡 " + o + "/" + c); unbalanced++; }
 }
 if (unbalanced === 0) pass("全部平衡");
+
+// ------------------------------------------------ 9. 内部 this 调用存在性
+// 83a9fdd 删了 _forceUnsubscribe 方法却留下调用，audit 全绿但一按就崩。
+// 方法定义与调用必须对得上，页面同理。
+console.log("\n[9] 内部 this 调用 vs 实际定义");
+for (const [name, text] of [["app.ux", src.appux], ["index.ux", src.page]]) {
+  const defined = new Set([...text.matchAll(/^  (\w+)\s*\(/gm)].map((m) => m[1]));
+  const internal = new Set([...text.matchAll(/this\.(\w+)\(/g)].map((m) => m[1]));
+  let bad = 0;
+  for (const m of internal) {
+    if (!defined.has(m)) { fail(name + " 调用 this." + m + "() 但没有定义"); bad++; }
+  }
+  if (bad === 0) pass(name + " 检查 " + internal.size + " 个内部调用");
+}
+
+// ------------------------------------------------ 10. 容错参数真的被用上
+console.log("\n[10] 匹配容错链路（滑杆 -> 存储 -> bestMatch）");
+{
+  const m = src.svc.match(/bestMatch\(([^)]*)\)/);
+  if (!m) fail("ControlService 没有调用 bestMatch");
+  else if (!/tolerance/.test(m[1])) fail("bestMatch 没传 tolerance，面板滑杆是摆设");
+  else pass("bestMatch 使用 tolerance");
+}
+
+// ------------------------------------------------ 11. 学习选项与编码一一对应
+console.log("\n[11] 手势学习选项 vs 方向编码");
+{
+  const blocks = [...src.panel.matchAll(/val dirs = arrayOf\(([^)]*)\)\s*\n\s*val codes = arrayOf\(([^)]*)\)/g)];
+  if (blocks.length === 0) warn("没找到 dirs/codes 配对");
+  for (const b of blocks) {
+    const nDirs = b[1].split(",").length;
+    const nCodes = b[2].split(",").length;
+    if (nDirs !== nCodes) fail("学习对话框 dirs(" + nDirs + ") 与 codes(" + nCodes + ") 数量不一致，会越界");
+    else pass("dirs/codes 各 " + nDirs + " 项");
+  }
+}
 
 // ------------------------------------------------ 汇总
 console.log("\n" + "=".repeat(50));

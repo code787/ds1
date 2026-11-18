@@ -58,6 +58,7 @@ class XiaomiWearableTransport private constructor(private val context: Context) 
     private var onCommand: ((Command) -> Unit)? = null
     private var onStatus: (() -> Unit)? = null
     private var onError: ((String) -> Unit)? = null
+    private var onProgress: ((String) -> Unit)? = null
 
     // 延迟初始化：SDK 类在类加载时就会触发，必须包起来
     // 官方示例统一用 applicationContext，这里保持一致。
@@ -68,29 +69,36 @@ class XiaomiWearableTransport private constructor(private val context: Context) 
     private val messageApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getMessageApi(appContext) }.getOrNull() }
     private val serviceApi by lazy { runCatching { com.xiaomi.xms.wearable.Wearable.getServiceApi(appContext) }.getOrNull() }
 
-    private val listener = com.xiaomi.xms.wearable.message.OnMessageReceivedListener { fromNode, payload ->
-        // 先记原始帧：手环到底发没发过来，靠这一行判断
-        DiagnoseLog.append(context, "收到消息 from=$fromNode 字节数=${payload?.size ?: 0}")
+    /** 体感原始帧计数：约 50 帧/秒，逐帧写日志会把诊断文件刷爆。 */
+    private var rawFrameCount = 0L
 
+    private val listener = com.xiaomi.xms.wearable.message.OnMessageReceivedListener { fromNode, payload ->
         val handler = onCommand
         if (handler == null) {
-            DiagnoseLog.append(context, "  -> 丢弃：onCommand 未注册")
+            DiagnoseLog.append(context, "收到消息但 onCommand 未注册，丢弃 from=$fromNode")
             return@OnMessageReceivedListener
         }
         val text = try {
             String(payload, Charsets.UTF_8)
         } catch (t: Throwable) {
-            DiagnoseLog.append(context, "  -> payload 解码失败: ${t.message}")
+            DiagnoseLog.append(context, "payload 解码失败: ${t.message}")
             return@OnMessageReceivedListener
         }
-        DiagnoseLog.append(context, "  内容=$text")
-
         val command = Command.decode(text)
         if (command == null) {
-            DiagnoseLog.append(context, "  -> 无法识别的指令")
+            DiagnoseLog.append(context, "无法识别的指令 from=$fromNode 内容=$text")
             return@OnMessageReceivedListener
         }
-        DiagnoseLog.append(context, "  解析为: ${command.javaClass.simpleName}")
+        if (command is Command.RawAccel) {
+            // 原始加速度帧只聚合计数，每 250 帧（约 5 秒）记一条。
+            // 之前每帧写 3 行日志，64KB 文件几秒就满，真正的错误全被挤掉。
+            rawFrameCount++
+            if (rawFrameCount % 250 == 1L) {
+                DiagnoseLog.append(context, "体感原始帧累计 $rawFrameCount 条（最近 from=$fromNode）")
+            }
+        } else {
+            DiagnoseLog.append(context, "收到消息 from=$fromNode 解析为: ${command.javaClass.simpleName} 内容=$text")
+        }
         try {
             handler(command)
         } catch (t: Throwable) {
@@ -101,10 +109,16 @@ class XiaomiWearableTransport private constructor(private val context: Context) 
     fun hasNode(): Boolean = !nodeId.isNullOrEmpty()
 
     /** 发现手环节点并注册接收监听。任何失败都通过 onError 报告，不抛异常。 */
-    fun start(onCommand: (Command) -> Unit, onStatus: () -> Unit, onError: (String) -> Unit) {
+    fun start(
+        onCommand: (Command) -> Unit,
+        onStatus: () -> Unit,
+        onError: (String) -> Unit,
+        onProgress: ((String) -> Unit)? = null,
+    ) {
         this.onCommand = onCommand
         this.onStatus = onStatus
         this.onError = onError
+        this.onProgress = onProgress
 
         if (nodeApi == null || authApi == null || messageApi == null) {
             fail("小米互联 SDK 初始化失败：未安装小米运动健康或版本不匹配")
@@ -161,6 +175,7 @@ class XiaomiWearableTransport private constructor(private val context: Context) 
         onCommand = null
         onStatus = null
         onError = null
+        onProgress = null
     }
 
     /**
@@ -245,6 +260,8 @@ class XiaomiWearableTransport private constructor(private val context: Context) 
                 override fun onServiceDisconnected() {
                     Log.w(TAG, "宿主服务已断开")
                     step("宿主服务已断开")
+                    // 宿主恢复后节点 id 可能已变，重查一次
+                    retryNodeSoon()
                 }
             }
             hostListener = listener
@@ -260,12 +277,13 @@ class XiaomiWearableTransport private constructor(private val context: Context) 
         }
     }
 
-    /** 分步诊断：每一步都同时推到界面和日志文件。 */
+    /** 分步诊断：进度走 onProgress，没有进度回调才退回 onError。 */
     private fun step(message: String) {
         Log.i(TAG, "步骤: $message")
         DiagnoseLog.append(context, "步骤: $message")
         try {
-            onError?.invoke("步骤: $message")
+            val cb = onProgress ?: onError
+            cb?.invoke("步骤: $message")
         } catch (t: Throwable) {
             // 诊断失败不能影响主流程
         }
@@ -299,7 +317,9 @@ class XiaomiWearableTransport private constructor(private val context: Context) 
                 id = "st-${System.currentTimeMillis()}",
                 link = if (hasNode()) "connected" else "disconnected",
                 battery = battery,
-                listening = true,
+                // 如实反映无障碍服务状态，不能硬编码 true——
+                // 手环靠这个字段提示「手机手势服务未开」。
+                listening = com.wristcontrol.app.input.ControlAccessibilityService.Access.isReady(),
             )
             val ok = sendRaw(payload)
             DiagnoseLog.append(context, "推送状态帧 -> ${if (ok) "已交给通道" else "失败"}")
@@ -462,8 +482,15 @@ class XiaomiWearableTransport private constructor(private val context: Context) 
                 api.removeListener(previous)
             }
             api.addListener(target, listener)
+                .addOnSuccessListener {
+                    DiagnoseLog.append(context, "addListener(${target.take(8)}…) 成功")
+                }
                 .addOnFailureListener { error ->
+                    // 异步失败也要回滚标志，不然下次 startListening 以为还在监听，
+                    // 直接 return，永远收不到消息。
+                    if (listeningNodeId == target) listeningNodeId = null
                     Log.w(TAG, "addListener 失败: ${error.message}")
+                    DiagnoseLog.append(context, "addListener 失败: ${error.javaClass.simpleName} ${error.message}")
                 }
         } catch (t: Throwable) {
             listeningNodeId = previous
@@ -482,6 +509,35 @@ class XiaomiWearableTransport private constructor(private val context: Context) 
         }
     }
 
+    /** 上次重查节点的时间与进行中标记，限流用。 */
+    @Volatile private var lastNodeRetryAt = 0L
+    @Volatile private var nodeRetryRunning = false
+
+    /**
+     * 发送失败后重新发现节点。
+     *
+     * 手环断连再连后 nodeId 会变，拿旧 id 发消息永远失败；
+     * 启动时那次 30 秒轮询早就结束了，必须有路径重新查节点。
+     * 10 秒限流 + 单飞标记，避免心跳每 5 秒触发一次叠加轮询。
+     */
+    private fun retryNodeSoon() {
+        val now = System.currentTimeMillis()
+        if (nodeRetryRunning || now - lastNodeRetryAt < 10_000L) return
+        lastNodeRetryAt = now
+        nodeRetryRunning = true
+        refreshNode { resolved, reason ->
+            nodeRetryRunning = false
+            if (resolved == null) {
+                DiagnoseLog.append(context, "重查节点失败: $reason")
+                return@refreshNode
+            }
+            DiagnoseLog.append(context, "重查节点拿到 ${resolved.take(8)}…")
+            startListening(resolved)
+            launchWearPage(resolved)
+            safeStatus()
+        }
+    }
+
     /** 发送任意 UTF-8 载荷。没有节点时直接返回 false，不伪造成功。 */
     fun sendRaw(payload: ByteArray): Boolean {
         if (!sdkAvailable) return false
@@ -491,10 +547,13 @@ class XiaomiWearableTransport private constructor(private val context: Context) 
             api.sendMessage(target, payload)
                 .addOnFailureListener { error ->
                     Log.w(TAG, "sendMessage 失败: ${error.message}")
+                    DiagnoseLog.append(context, "sendMessage 失败: ${error.javaClass.simpleName}，尝试重查节点")
+                    retryNodeSoon()
                 }
             true
         } catch (t: Throwable) {
             Log.w(TAG, "sendMessage 抛出: ${t.javaClass.simpleName}")
+            retryNodeSoon()
             false
         }
     }

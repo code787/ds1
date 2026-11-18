@@ -129,20 +129,23 @@ class GesturePanel(private val activity: Activity) {
             textSize = 13f
         })
         rotationValue = TextView(activity).apply {
-            text = "当前：" + cfgStore.load().rotationOffset + "°"
+            text = "当前：" + cfg.rotationOffset + "°"
             textSize = 15f
             setPadding(0, 8, 0, 0)
         }
         root.addView(rotationValue)
         root.addView(android.widget.SeekBar(activity).apply {
             max = 360
-            progress = (cfgStore.load().rotationOffset + 180)
+            progress = (cfg.rotationOffset + 180)
             setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(sb: android.widget.SeekBar?, p: Int, fromUser: Boolean) {
                     if (!fromUser) return
                     val value = p - 180
                     rotationValue?.text = "当前：" + value + "°"
-                    saveCfg(cfgStore.load().copy(rotationOffset = value))
+                    // 和其他滑杆走同一条路：基于面板快照 cfg 改。
+                    // 之前单独 load() 会把别的滑杆刚改的值覆盖回去。
+                    cfg = cfg.copy(rotationOffset = value)
+                    applyCfg()
                 }
                 override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
                 override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {}
@@ -253,12 +256,6 @@ class GesturePanel(private val activity: Activity) {
 
     private fun applyCfg() {
         cfgStore.save(cfg)
-        com.wristcontrol.app.transport.ServiceRef.current?.pushConfig()
-    }
-
-    /** 保存配置并立即下发手环。 */
-    private fun saveCfg(c: GestureConfig) {
-        cfgStore.save(c)
         try {
             com.wristcontrol.app.transport.ServiceRef.current?.pushConfig()
         } catch (t: Throwable) {
@@ -299,7 +296,9 @@ class GesturePanel(private val activity: Activity) {
     }
 
     private fun startLearn() {
-        val dirs = arrayOf("N 上", "NE 右上", "E 右", "SE 右下", "S 下", "SW 左下", "W 左", "NW 左上")
+        // 引擎只有四方向（N/E/S/W），选项必须和 codes 一一对应。
+        // 之前列了 8 个方向，选第 5 个起直接数组越界崩溃，前 4 个映射也是错的。
+        val dirs = arrayOf("N 上", "E 右", "S 下", "W 左")
         val codes = arrayOf("N", "E", "S", "W")
         val first = arrayOfNulls<String>(1)
 
@@ -314,7 +313,7 @@ class GesturePanel(private val activity: Activity) {
     }
 
     private fun chooseSecond(firstDir: String) {
-        val dirs = arrayOf("（只要一个方向）", "N 上", "NE 右上", "E 右", "SE 右下", "S 下", "SW 左下", "W 左", "NW 左上")
+        val dirs = arrayOf("（只要一个方向）", "N 上", "E 右", "S 下", "W 左")
         val codes = arrayOf("", "N", "E", "S", "W")
         AlertDialog.Builder(activity)
             .setTitle("第二步：第二个方向（可跳过）")

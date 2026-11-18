@@ -7,35 +7,33 @@
  *
  * 分级设计（盲操作时唯一的反馈通道）：
  * - tick：轻震一下，指令已发出
- * - ok：两下短震，手势识别成功
+ * - ok：短震，手势识别成功
  * - err：长震，出错
- * - alarm：连续震，找手机之类需要引起注意的
+ * - alarm：长震，找手机之类需要引起注意的
  */
 
 var vibrator = require("@system.vibrator");
 
-function play(pattern) {
+// Vela 的 vibrate 只认 mode: "short" / "long"，
+// count/delay 不是标准参数，传了也不生效——分级只能靠长短。
+function play(mode) {
   try {
-    vibrator.vibrate({
-      mode: "short",
-      count: pattern.count,
-      delay: pattern.delay,
-    });
+    vibrator.vibrate({ mode: mode });
   } catch (e) {
     // 手环不支持震动时静默——震动只是反馈，不是功能
   }
 }
 
 module.exports = {
-  /** 轻震一下。 */
-  tick: function () { play({ count: 1, delay: 0 }); },
+  /** 轻震一下：指令已发出。 */
+  tick: function () { play("short"); },
 
-  /** 两下短震：成功。 */
-  ok: function () { play({ count: 2, delay: 80 }); },
+  /** 短震：成功（固件不支持连震，一下短震代替两下）。 */
+  ok: function () { play("short"); },
 
   /** 长震：出错。 */
-  err: function () { play({ count: 1, delay: 0 }); },
+  err: function () { play("long"); },
 
-  /** 连续震：需要注意。 */
-  alarm: function () { play({ count: 4, delay: 150 }); },
+  /** 长震：需要注意。 */
+  alarm: function () { play("long"); },
 };

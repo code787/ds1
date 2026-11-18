@@ -113,13 +113,23 @@ class ControlService : Service() {
             transport = t
             t.start(
                 onCommand = ::handleCommandSafely,
-                onStatus = { pushStatus(force = true) },
+                onStatus = {
+                    // safeStatus 成功推帧才算真的连上
+                    bridgeStatus = "已连接"
+                    updateNotification()
+                    pushStatus(force = true)
+                },
+                onProgress = { msg ->
+                    bridgeStatus = msg
+                    updateNotification()
+                },
                 onError = { reason ->
-                    bridgeStatus = reason
+                    bridgeStatus = "桥接失败：$reason"
                     updateNotification()
                 },
             )
-            bridgeStatus = "已连接"
+            // start 是异步的，这里不能提前宣布「已连接」
+            bridgeStatus = "正在连接手环…"
         } catch (t: Throwable) {
             // NoClassDefFoundError / UnsatisfiedLinkError 都会走到这里
             Log.w(TAG, "桥接启动失败: ${t.javaClass.simpleName} ${t.message}")
@@ -255,7 +265,6 @@ class ControlService : Service() {
         }
 
         DiagnoseLog.append(this, "  执行结果=$executed")
-        DiagnoseLog.append(this, "  执行结果=$executed")
         // 只有真的执行成功才回执，失败不回执，手环会停在"已发送…"
         if (executed) ack()
     }
@@ -332,9 +341,9 @@ class ControlService : Service() {
     }
 
     /**
-     * 手环识别出手势后，查映射并执行。
+     * 识别出手势后，查映射并执行。
      *
-     * 识别在手环、映射在手机：改映射不用重装 RPK。
+     * 识别和映射都在手机端：改算法/映射不用重装 RPK。
      * 匹配用编辑距离，没有足够接近的模板就不动——宁可没反应，也不猜错。
      */
     private fun handleGesture(pathText: String) {
@@ -347,7 +356,9 @@ class ControlService : Service() {
             return
         }
 
-        val hit = com.wristcontrol.app.gesture.GestureMatcher.bestMatch(actual, templates)
+        // 容错必须用用户设置的值，不然面板上的滑杆是摆设
+        val tolerance = configStore.load().tolerance
+        val hit = com.wristcontrol.app.gesture.GestureMatcher.bestMatch(actual, templates, tolerance)
         if (hit == null) {
             DiagnoseLog.append(this, "  -> 没有匹配的模板（差太多，不执行）")
             return
