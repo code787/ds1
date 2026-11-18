@@ -119,6 +119,9 @@ class GestureEngine(private var config: GestureConfig = GestureConfig()) {
 
     fun isCalibrated(): Boolean = calibrated
 
+    /** 左右取反：佩戴习惯/左右手相反时镜像左右（E↔W），上下不变。 */
+    var flipLR = false
+
     /** 最近一次滤波后的值，供诊断显示。 */
     @Volatile
     var lastX: Float = 0f
@@ -198,7 +201,7 @@ class GestureEngine(private var config: GestureConfig = GestureConfig()) {
         // 这样 deadZone 才是真正的「倾斜多少度才算动」。
         val gTotal = hypot(hypot(x, y), az.toDouble())
         val tiltDeg: Double
-        val angle: Double
+        var angle: Double
         if (calibrated && gTotal > 0.01) {
             // 校准模式：零位 = 用户校准时的姿势，不是水平面。
             // 倾角 = 当前重力方向与基线方向的夹角（度），松手回到基线即回零。
@@ -207,14 +210,40 @@ class GestureEngine(private var config: GestureConfig = GestureConfig()) {
             val cz = az.toDouble() / gTotal
             val dot = (cx * baseX + cy * baseY + cz * baseZ).coerceIn(-1.0, 1.0)
             tiltDeg = Math.toDegrees(acos(dot))
-            // 方向 = 相对基线的偏移在 x/y 平面上的指向。
-            // 偏移太小时方向不可靠，沿用上一帧角度（此时倾角也小，出不了死区）。
-            val dx = cx - baseX
-            val dy = cy - baseY
-            angle = if (hypot(dx, dy) < 0.02) {
-                lastAngle.toDouble()
+            // 方向 = 当前重力在「垂直于基线的切平面」上投影的指向。
+            // 不能直接用偏移量 (cx-bx, cy-by)：基线重力落在某轴上时该轴偏移
+            // 永远单边（如 by≈1 时 cy-by 恒 ≤0），半个方向圈会消失——
+            // 真机症状「校准完只有左没有右」就是这么来的。
+            val px = cx - dot * baseX
+            val py = cy - dot * baseY
+            val pz = cz - dot * baseZ
+            // 切平面上取稳定参考轴：优先传感器 x 轴，与基线近平行时换 y 轴。
+            var ux = 1.0 - baseX * baseX
+            var uy = -baseX * baseY
+            var uz = -baseX * baseZ
+            var uLen = hypot(hypot(ux, uy), uz)
+            if (uLen < 0.1) {
+                ux = -baseY * baseX
+                uy = 1.0 - baseY * baseY
+                uz = -baseY * baseZ
+                uLen = hypot(hypot(ux, uy), uz)
+            }
+            if (uLen < 1e-6) {
+                angle = lastAngle.toDouble()
             } else {
-                ((Math.toDegrees(atan2(dy, dx)) + config.rotationOffset) % 360 + 360) % 360
+                ux /= uLen; uy /= uLen; uz /= uLen
+                // v = 基线 × u，与 u 构成切平面坐标系
+                val vx = baseY * uz - baseZ * uy
+                val vy = baseZ * ux - baseX * uz
+                val vz = baseX * uy - baseY * ux
+                val pu = px * ux + py * uy + pz * uz
+                val pv = px * vx + py * vy + pz * vz
+                // 投影太小时方向不可靠，沿用上一帧（此时倾角也小，出不了死区）。
+                angle = if (hypot(pu, pv) < 0.02) {
+                    lastAngle.toDouble()
+                } else {
+                    ((Math.toDegrees(atan2(pv, pu)) + config.rotationOffset) % 360 + 360) % 360
+                }
             }
         } else {
             // 未校准：以水平面为零位（旧行为，保证没校准也能用）
@@ -222,6 +251,8 @@ class GestureEngine(private var config: GestureConfig = GestureConfig()) {
             tiltDeg = Math.toDegrees(asin(tiltFrac.coerceIn(0.0, 1.0)))
             angle = ((Math.toDegrees(atan2(y, x)) + config.rotationOffset) % 360 + 360) % 360
         }
+        // 左右取反：沿南北轴镜像，E↔W 互换，N/S 不变。两种模式都生效。
+        if (flipLR) angle = ((180.0 - angle) % 360 + 360) % 360
         lastAngle = angle.toFloat()
         lastTilt = tiltDeg.toFloat()
 

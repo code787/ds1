@@ -28,6 +28,7 @@ class GesturePanel(private val activity: Activity) {
     private var cfg = cfgStore.load()
     private var rotationValue: TextView? = null
     private var calStatus: TextView? = null
+    private var flipButton: Button? = null
 
     private val root = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL
@@ -197,6 +198,21 @@ class GesturePanel(private val activity: Activity) {
             })
         })
 
+        flipButton = Button(activity).apply {
+            text = flipText(svc?.engineState()?.flipLR ?: false)
+            setOnClickListener {
+                val s = svc
+                if (s == null) {
+                    Toast.makeText(activity, "先去主页启动桥接", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                val next = !s.engineState().flipLR
+                s.setFlipLR(next)
+                flipButton?.text = flipText(next)
+            }
+        }
+        root.addView(flipButton)
+
         root.addView(Button(activity).apply {
             text = "＋ 学习新手势"
             setOnClickListener { startLearn() }
@@ -223,6 +239,9 @@ class GesturePanel(private val activity: Activity) {
         handler.removeCallbacks(poller)
     }
 
+    private fun flipText(on: Boolean): String =
+        if (on) "左右取反：开（再点一下关闭）" else "左右取反：关"
+
     private fun refreshLive() {
         val svc = com.wristcontrol.app.transport.ServiceRef.current
         if (svc == null) {
@@ -240,6 +259,8 @@ class GesturePanel(private val activity: Activity) {
 
         val calText = if (svc.engineState().isCalibrated()) "已校准：以你的姿势为零位" else "未校准（以水平面为零位）"
         if (calStatus?.text != calText) calStatus?.text = calText
+        val flipOn = svc.engineState().flipLR
+        if (flipButton?.text != flipText(flipOn)) flipButton?.text = flipText(flipOn)
 
         // 传感器原始数据
         val t = svc.lastTilt

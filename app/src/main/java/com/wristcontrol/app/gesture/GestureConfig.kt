@@ -112,4 +112,10 @@ class GestureConfigStore(context: Context) {
     fun clearBaseline() {
         prefs.edit().putBoolean("calOn", false).apply()
     }
+
+    fun loadFlipLR(): Boolean = prefs.getBoolean("flipLR", false)
+
+    fun saveFlipLR(on: Boolean) {
+        prefs.edit().putBoolean("flipLR", on).apply()
+    }
 }

@@ -315,11 +315,19 @@ class ControlService : Service() {
         com.wristcontrol.app.gesture.GestureEngine(configStore.load()).also { e ->
             val b = configStore.loadBaseline()
             if (b != null) e.setBaseline(b[0].toDouble(), b[1].toDouble(), b[2].toDouble())
+            e.flipLR = configStore.loadFlipLR()
         }
     }
 
     /** 供界面读实时状态。 */
     fun engineState(): com.wristcontrol.app.gesture.GestureEngine = engine
+
+    /** 面板开关：左右取反（镜像 E/W），立即生效并持久化。 */
+    fun setFlipLR(on: Boolean) {
+        engine.flipLR = on
+        configStore.saveFlipLR(on)
+        DiagnoseLog.i(TAG, "左右取反: " + (if (on) "开" else "关"))
+    }
 
     /** 最近一次实时方向，供界面读取。 */
     @Volatile
