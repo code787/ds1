@@ -326,7 +326,7 @@ class ControlService : Service() {
     fun setFlipLR(on: Boolean) {
         engine.flipLR = on
         configStore.saveFlipLR(on)
-        DiagnoseLog.i(TAG, "左右取反: " + (if (on) "开" else "关"))
+        DiagnoseLog.append(this, "左右取反: " + (if (on) "开" else "关"))
     }
 
     /** 最近一次实时方向，供界面读取。 */

@@ -199,9 +199,9 @@ class GesturePanel(private val activity: Activity) {
         })
 
         flipButton = Button(activity).apply {
-            text = flipText(svc?.engineState()?.flipLR ?: false)
+            text = flipText(com.wristcontrol.app.transport.ServiceRef.current?.engineState()?.flipLR ?: false)
             setOnClickListener {
-                val s = svc
+                val s = com.wristcontrol.app.transport.ServiceRef.current
                 if (s == null) {
                     Toast.makeText(activity, "先去主页启动桥接", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
